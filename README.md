@@ -1,70 +1,45 @@
-# PLAKA PIKETE · Render B v0.4.0 · Fase 4: motor de colas
+# PLAKA PIKETE — Render B v0.5.0 · Motor de normalización (primera fase)
 
-## Estado de esta fase
+## Objetivo
 
-- **Supabase B** (`cpdklixfmiibrcptleir`): las cuatro RPC de esta fase fueron instaladas y verificadas.
-- **Supabase C** (`wxleseokrzltkuyjmjev`): las cuatro RPC de esta fase fueron instaladas y verificadas.
-- La app Plaka, Gateway A, Supabase A y Render A no se modificaron.
-- **Procesamiento automático desactivado**. No se descargan canciones, no se consulta Telegram, no se normalizan automáticamente trabajos.
+Dejar de tratar las referencias externas como títulos libres. Separa la limpieza de metadatos, la identificación de versiones, las coincidencias con candidatos del catálogo y la comprobación de derechos. **No descarga, reproduce ni publica audio.**
 
-## ¿Qué se instala?
+## Instalación
 
-En `sql/003_pikete_queue_rpc.sql`:
+1. Descomprimir ZIP y subir todos sus archivos al repositorio GitHub `Eduardolv02/plaka-pikete-worker` manteniendo las carpetas.
+2. Render realiza el despliegue automático (mismo servicio `plaka-pikete-worker`).
+3. Las variables existentes son suficientes. NO activar `PIKETE_QUEUE_MUTATIONS_ENABLED` todavía.
+4. Comprobar `https://plaka-pikete-worker.onrender.com/health`: versión `pikete-render-b-0.5.0` y modo `normalization-engine-preview`.
 
-| RPC | Función |
-| --- | --- |
-| `pikete_queue_status()` | Conteo por estado, colas listas y reservas vencidas |
-| `pikete_queue_claim(worker, batch_size, lease_seconds)` | Reserva atómica de hasta 10 trabajos con `FOR UPDATE SKIP LOCKED` |
-| `pikete_queue_heartbeat(job_id, worker, progress, lease_seconds)` | Renueva una reserva válida y actualiza progreso |
-| `pikete_queue_finish(job_id, worker, outcome, error_code, retry_seconds)` | Cierra o reprograma trabajo bajo propiedad de la reserva |
+## Endpoint privado nuevo
 
-**Seguridad de las RPC:** se ejecutan como invocador (`SECURITY INVOKER`) y `EXECUTE` está concedido solo a `service_role`. Se comprueba la propiedad y vigencia de cada reserva antes de renovarla o terminarla.
+`POST /api/normalize/inspect`, encabezado `Authorization: Bearer <PIKETE_WORKER_KEY>`, `Content-Type: application/json`.
 
-## Paso 1: actualizar el mismo repositorio de GitHub
+### Ejemplo
 
-1. Descarga y descomprime este ZIP.
-2. Abre https://github.com/Eduardolv02/plaka-pikete-worker.
-3. Usa **Add file → Upload files** y sube todos los archivos descomprimidos, manteniendo las carpetas `src`, `tests` y `sql`.
-4. GitHub debe reemplazar `server.mjs`, `package.json` y `README.md`, y añadir `src/pikete-queue.mjs`, `tests/pikete-queue.test.mjs` y el SQL de migración.
-5. Pulsa **Commit changes** y espera el despliegue automático en Render.
+```json
+{
+  "source_url": "https://youtu.be/dQw4w9WgXcQ",
+  "catalog_candidates": [
+    {"id":"track-1", "artist":"Rick Astley", "title":"Never Gonna Give You Up"},
+    {"id":"track-2", "artist":"Rick Astley", "title":"Never Gonna Give You Up (Live)"}
+  ]
+}
+```
 
-**No hace falta ejecutar el SQL de la carpeta `sql`: ya se aplicó a B y C.** Lo incluimos para mantener la migración documentada en el repositorio y para poder reproducirla en el futuro.
+- Admite links HTTPS de YouTube, Spotify y SoundCloud; consulta **solo** metadatos oEmbed en dominios predefinidos.
+- Analiza variaciones: *live, remix, slowed, sped up, instrumental, acoustic, cover, remaster, demo, karaoke, radio edit*.
+- Distingue coincidencia por nombre, ambigüedad y conflicto de versión.
+- `catalog_candidates` es temporal y de **demostración**: todavía falta conectarlo a la búsqueda paginada del catálogo real, sin el límite del feed de 30 canciones.
+- **NUNCA** interpreta un título coincidente como confirmación de versión oficial o autorización de compartir.
+- `ready_to_share` siempre `false` hasta que tengamos procedencia comprobada y derechos.
 
-## Paso 2: verificar Render B
+## Próximo bloque integrado
 
-Abre https://plaka-pikete-worker.onrender.com/health.
+1. Producir `pikete_jobs` al añadir una referencia a la lista (Gateway B).
+2. Consumir trabajos bajo reserva y reintentos de RPC actuales (Render B), guardar `normalized_metadata` y estado de coincidencia.
+3. Buscar de verdad en el catálogo completo y fuentes musicales de metadatos (búsqueda paginada/ISRC/huellas).
+4. Validar permisos de audio y evitar duplicados en Telegram cuando el material esté autorizado.
+5. Exponer el estado del trabajo en Android y permitir revisión manual cuando haya ambigüedad.
 
-Debes ver la versión `pikete-render-b-0.4.0` y modo `queue-rpc-ready`.
-
-## Paso 3: diagnóstico privado de las colas
-
-Con la misma clave `PIKETE_WORKER_KEY` ya configurada en Render, llama a:
-
-`GET https://plaka-pikete-worker.onrender.com/api/queue/status`
-
-Usa el encabezado `Authorization: Bearer <PIKETE_WORKER_KEY>`.
-
-Resultado esperado para ambas colas recién creadas: `state: ready`, `counts.total: 0`, `polling: disabled`.
-
-**No se requiere ninguna variable nueva para este paso.** `PIKETE_QUEUE_MUTATIONS_ENABLED` permanece desactivada por defecto.
-
-## Rutas privadas añadidas
-
-- `GET /api/queue/status`: resumen de B y C (no muta datos).
-- `POST /api/queue/claim`: reserva trabajos (bloqueada por defecto).
-- `POST /api/queue/heartbeat`: renueva reserva (bloqueada por defecto).
-- `POST /api/queue/finish`: finaliza o reintenta (bloqueada por defecto).
-
-Para habilitar **más adelante** las operaciones de escritura desde el backend, configura **`PIKETE_QUEUE_MUTATIONS_ENABLED=true`** solo cuando el Gateway y el procesador estén preparados y hayamos probado los flujos. No activar ahora.
-
-## Qué falta para reproducir canciones compartidas
-
-1. Gateway B: comprobar JWT del Supabase A, autorización y asignación estable de usuario/playlist al nodo B o C.
-2. Productor de trabajos desde app/Gateway, con deduplicación.
-3. Procesador efectivo que haga normalización, coincidencia de catálogo y revisión de derechos; nunca marcar un audio como compartible sin comprobaciones.
-4. Archivado y enlaces de reproducción con autorización.
-5. Pruebas de concurrencia, capacidad y funcionamiento desde Cuba.
-
-## Tests
-
-`npm test` (Node 20+).
+No hay cambios en Supabase ni en Android en este ZIP. El endpoint `/api/normalize` original sigue disponible.

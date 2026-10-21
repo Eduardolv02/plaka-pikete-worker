@@ -46,7 +46,7 @@ export async function callQueueRpc(node, functionName, payload, options = {}) {
         apikey: secret,
         'Content-Type': 'application/json',
         Accept: 'application/json',
-        'User-Agent': 'plaka-pikete-render-b/0.4.0',
+        'User-Agent': 'plaka-pikete-render-b/0.5.0',
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(8000),
