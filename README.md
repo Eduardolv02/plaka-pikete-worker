@@ -1,48 +1,47 @@
-# PLAKA PIKETE · Render B · Arranque mínimo 0.1.0
+# PLAKA PIKETE · Render B · Fase 1 · v0.2.0
 
-**Objetivo de esta versión:** comprobar que el Render de un compañero arranca independientemente de Plaka Studio. No modifica Supabase, Cloudflare ni Telegram. No descarga música, no ejecuta yt-dlp y todavía no recoge trabajos de las colas. Ese será el siguiente módulo después de verificar el despliegue.
+**Objetivo:** confirmar desde Render B la conexión de red con los dos proyectos Supabase secundarios **sin acceder a datos, alterar bases, ni subir secretos al repositorio**. Esta versión mantiene el normalizador anterior.
 
-## A. Crear repositorio GitHub público (desde navegador)
+## Proyectos
+- Nodo B / plaka 2: `https://cpdklixfmiibrcptleir.supabase.co`
+- Nodo C / plaka 3: `https://wxleseokrzltkuyjmjev.supabase.co`
 
-1. Entrar a https://github.com/new desde una cuenta GitHub que pueda administrar el repositorio.
-2. Nombre sugerido: `plaka-pikete-worker`.
-3. Elegir **Public** y pulsar **Create repository**.
-4. Descomprimir este ZIP en tu PC; en el repositorio pulsar **Add file → Upload files**.
-5. Subir **el contenido de la carpeta**, no el ZIP ni una carpeta adicional. Asegúrate de que `package.json`, `server.mjs` y `src/normalize.mjs` estén en la raíz o sus rutas indicadas.
-6. Pulsar **Commit changes**. **NUNCA subir tokens, contraseñas, service_role o archivos `.env`.**
+## Actualizar el GitHub público
+1. Abrir `https://github.com/Eduardolv02/plaka-pikete-worker`.
+2. Subir todos los archivos y carpetas descomprimidos de este ZIP en la **raíz** del repositorio (reemplazando los existentes).
+3. Hacer **Commit changes**. Render debe redesplegar el servicio desde `main`.
+4. Si no hubo redeploy automático, pulsar **Manual Deploy → Deploy latest commit** en Render.
 
-## B. Desplegar en Render Free
+## Variables de entorno (Render → plaka-pikete-worker → Environment)
+- `PIKETE_WORKER_KEY`: clave aleatoria de al menos 32 caracteres; **rota la anterior, que fue compartida en el chat.** No publicar ni enviarla.
+- `PIKETE_SUPABASE_B_URL` = `https://cpdklixfmiibrcptleir.supabase.co`
+- `PIKETE_SUPABASE_C_URL` = `https://wxleseokrzltkuyjmjev.supabase.co`
 
-1. Tu compañero inicia sesión en https://dashboard.render.com.
-2. **New → Web Service → Public Git Repository** (la etiqueta puede variar).
-3. Pegar la URL del repositorio público y conectar.
-4. Elegir `Node` como runtime (si aparece), plan **Free**, nombre `plaka-pikete-worker`.
-5. Root Directory: en blanco, Build Command: `npm install`, Start Command: `npm start`.
-6. **Environment**: añadir `PIKETE_WORKER_KEY` con un valor aleatorio de mínimo 32 caracteres, solamente en Render. No compartirlo en capturas o GitHub. Render configura `PORT` automáticamente.
-7. Crear el servicio y esperar el deploy; abrir `https://TU-SERVICIO.onrender.com/health`.
+Las URL no son secretos. En esta fase **no necesitas ni debes añadir service_role, anon key, bot tokens o credenciales de Google.** El diagnóstico accede únicamente al endpoint de salud de Supabase Auth, sin consultar ninguna tabla.
 
-Salida esperada: JSON con `"ok":true`, `"service":"plaka-pikete-render-b"`, `"mode":"bootstrap"`.
+## Comprobaciones
+### Pública
+`https://plaka-pikete-worker.onrender.com/health`
 
-## C. Prueba privada (opcional; después del health)
+Debe mostrar `version: pikete-render-b-0.2.0` y `mode: supabase-connectivity`.
 
-Desde PowerShell, sustituyendo la URL y leyendo el secreto sin mostrarlo en pantalla:
+### Privada: diagnóstico B y C
+Desde **PowerShell** en un ordenador, pega las cuatro líneas y escribe la **clave nueva** cuando te la solicite (no aparece en pantalla):
 
 ```powershell
-$base = 'https://TU-SERVICIO.onrender.com'
-$secret = Read-Host 'PIKETE_WORKER_KEY'
-$headers = @{Authorization = "Bearer $secret"}
-$body = @{artist='Daft Punk';title='One More Time.mp3'} | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri "$base/api/normalize" -Headers $headers -Body $body -ContentType 'application/json'
+$secret = Read-Host 'Clave nueva de PIKETE_WORKER_KEY'
+$headers = @{ Authorization = "Bearer $secret" }
+try { Invoke-RestMethod -Uri 'https://plaka-pikete-worker.onrender.com/api/supabase/check' -Headers $headers -Method Get | ConvertTo-Json -Depth 5 } catch { if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message } }
+Remove-Variable secret, headers
 ```
 
-Debe devolver `identification_status: pending_external_match` y `ready_to_share: false`: se limpian metadatos, **NO se identifica aún la versión oficial ni se concede permiso de distribuir audio**.
+**Resultado ideal:** `"ok": true` y nodos B/C `"state":"reachable"`. Si retorna `reachable_auth_restricted`, Render llegó al servidor pero el servicio Auth rechazó la comprobación sin credenciales; no significa necesariamente que la base esté rota. Si `network_error` o `timeout`, necesitamos revisar conexión y reglas de red. La respuesta HTTP 503 indica que uno o ambos nodos aún no alcanzan `reachable`.
 
-## D. Próximos módulos (NO incluidos)
+También se puede ejecutar `npm test` localmente: no consume red y valida el parser anti-SSRF y los estados.
 
-1. Verificar acceso de Render B a Supabase B/C con claves exclusivamente en variables de entorno.
-2. Implementar cola persistente y leasing atómico; gestión de reintentos y límites.
-3. Identificación mediante fuentes musicales y confirmación de versiones.
-4. Integración Telegram únicamente para archivos con autorización de distribución.
-5. Endpoints de estado y progreso a Cloudflare B, autenticados y con límites.
+## Lo que esta fase NO hace
+- No conecta credenciales SQL ni inspecciona datos o colas.
+- No crea tablas ni RPCs; el esquema diseñado previamente para la base principal referencia `auth.users` y **no se puede copiar sin adaptación a Supabase B/C**.
+- No descarga música, no usa Telegram, no sube audio ni da acceso a playlists.
 
-**Seguridad:** el repositorio es público; nunca publiques claves de Supabase, Telegram, Cloudflare ni de `PIKETE_WORKER_KEY`. El endpoint de normalización rechaza llamadas sin secreto. `/health` es público deliberadamente.
+**Siguiente fase prevista:** migración mínima en B/C con `user_id uuid` canónico del proyecto principal sin claves foráneas a `auth.users` local, y RPCs de cola de privilegios mínimos. Render B reclamará trabajos solo tras validar identidad y autorización a través del gateway.

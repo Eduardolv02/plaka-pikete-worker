@@ -1,18 +1,20 @@
 import http from 'node:http';
+import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
+import { checkBothSupabaseNodes } from './src/supabase-probe.mjs';
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-0.1.0';
+const version = 'pikete-render-b-0.2.0';
 const maxBodyBytes = 8192;
 
-function reply(res, status, obj, extraHeaders = {}) {
+function reply(res, status, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
-    ...extraHeaders,
+    'Referrer-Policy': 'no-referrer',
   });
   res.end(body);
 }
@@ -21,12 +23,18 @@ function isAuthorized(req) {
   const auth = req.headers.authorization || '';
   const expected = `Bearer ${key}`;
   if (auth.length !== expected.length) return false;
-  // Timing safe comparison of equal-length values.
-  return (awaitImportEqual(auth, expected));
+  return timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
 }
-import { timingSafeEqual } from 'node:crypto';
-function awaitImportEqual(a, b) {
-  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+function authorizeOrReply(req, res) {
+  if (!key || key.length < 32) {
+    reply(res, 503, {ok:false,code:'worker_key_not_configured'});
+    return false;
+  }
+  if (!isAuthorized(req)) {
+    reply(res, 401, {ok:false,code:'unauthorized'});
+    return false;
+  }
+  return true;
 }
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -53,22 +61,29 @@ const server = http.createServer(async (req, res) => {
   try {
     const path = new URL(req.url, 'http://localhost').pathname;
     if (req.method === 'GET' && (path === '/' || path === '/health')) {
-      return reply(res, 200, { ok: true, service: 'plaka-pikete-render-b', version,
-        mode: 'bootstrap',
-        note: 'Sin conexión a Supabase ni descargas: despliegue de infraestructura inicial.' });
+      return reply(res, 200, {
+        ok: true,
+        service: 'plaka-pikete-render-b',
+        version,
+        mode: 'supabase-connectivity',
+        note: 'Supabase B/C: comprobacion de conectividad bajo autenticacion. Sin colas activas.'
+      });
+    }
+    if (req.method === 'GET' && path === '/api/supabase/check') {
+      if (!authorizeOrReply(req, res)) return;
+      const result = await checkBothSupabaseNodes();
+      return reply(res, result.ok ? 200 : 503, result);
     }
     if (req.method === 'POST' && path === '/api/normalize') {
-      if (!key || key.length < 32) return reply(res, 503, {ok:false,code:'worker_key_not_configured'});
-      if (!isAuthorized(req)) return reply(res, 401, {ok:false,code:'unauthorized'});
+      if (!authorizeOrReply(req, res)) return;
       const body = await readJson(req);
       const result = normalizeMetadata(body);
-      if (!result.ok) return reply(res, 400, result);
-      return reply(res, 200, result);
+      return reply(res, result.ok ? 200 : 400, result);
     }
     return reply(res, 404, {ok:false,code:'not_found'});
   } catch (err) {
     if (err?.status === 400 || err?.status === 413) return reply(res, err.status, {ok:false,code:err.message});
-    console.error('request_failed', err?.message);
+    console.error('request_failed', err?.name || 'unexpected');
     if (!res.headersSent && !res.destroyed) reply(res, 500, {ok:false,code:'internal_error'});
   }
 });

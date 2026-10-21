@@ -1,12 +1,12 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Pikete: nodo de procesamiento separado del servicio principal de Plaka.",
+  "description": "Pikete Render B: normalizacion y conexion de diagnostico Supabase B/C",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"
   },
-  "engines": {"node": ">=20"}
+  "engines": {"node": ">=20 <27"}
 }
