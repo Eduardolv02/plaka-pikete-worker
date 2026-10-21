@@ -1,53 +1,70 @@
-# Plaka Pikete · Render B · v0.3.0 — Comprobación de claves Supabase B y C
+# PLAKA PIKETE · Render B v0.4.0 · Fase 4: motor de colas
 
-## Qué hace
-- Mantiene `/health` y `/api/normalize` de versiones anteriores.
-- **GET `/api/supabase/check`** (Bearer `PIKETE_WORKER_KEY`): envía cada clave secreta con cabecera `apikey` a la **raíz de PostgREST** `/rest/v1/` de su Supabase. Un HTTP 200 confirma que la **API REST reconoce la clave**; nunca se descarga ni devuelve el esquema a quien llama.
-- **GET `/api/supabase/network`**: conserva el test de alcance de red anterior, con estados `reachable_auth_restricted` considerados alcanzables.
-- No lee filas ni escribe en Supabase; NO activa colas, NO crea tablas, NO conecta Telegram.
-- **No incluye secretos** en los archivos que subirás al GitHub público.
+## Estado de esta fase
 
-## Actualización en GitHub
-1. Descomprime el ZIP.
-2. Abre https://github.com/Eduardolv02/plaka-pikete-worker
-3. Sube **el contenido** de la carpeta descomprimida a la raíz del repo, reemplazando archivos. Comprueba que `src/supabase-authenticated.mjs` y `tests/supabase-authenticated.test.mjs` se hayan incluido.
-4. Haz `Commit changes`. Render desplegará el nuevo commit automáticamente o usa `Manual Deploy`.
+- **Supabase B** (`cpdklixfmiibrcptleir`): las cuatro RPC de esta fase fueron instaladas y verificadas.
+- **Supabase C** (`wxleseokrzltkuyjmjev`): las cuatro RPC de esta fase fueron instaladas y verificadas.
+- La app Plaka, Gateway A, Supabase A y Render A no se modificaron.
+- **Procesamiento automático desactivado**. No se descargan canciones, no se consulta Telegram, no se normalizan automáticamente trabajos.
 
-## Variables en Render > plaka-pikete-worker > Environment
-Debes tener estas **cinco variables** (las configuradas antes se conservan):
+## ¿Qué se instala?
 
-| Key | Dónde obtenerla |
+En `sql/003_pikete_queue_rpc.sql`:
+
+| RPC | Función |
 | --- | --- |
-| `PIKETE_WORKER_KEY` | La existente, para autorizar diagnósticos internos |
-| `PIKETE_SUPABASE_B_URL` | `https://cpdklixfmiibrcptleir.supabase.co` |
-| `PIKETE_SUPABASE_B_SECRET_KEY` | Supabase plaka 2 > Settings > API Keys > Secret keys |
-| `PIKETE_SUPABASE_C_URL` | `https://wxleseokrzltkuyjmjev.supabase.co` |
-| `PIKETE_SUPABASE_C_SECRET_KEY` | Supabase plaka 3 > Settings > API Keys > Secret keys |
+| `pikete_queue_status()` | Conteo por estado, colas listas y reservas vencidas |
+| `pikete_queue_claim(worker, batch_size, lease_seconds)` | Reserva atómica de hasta 10 trabajos con `FOR UPDATE SKIP LOCKED` |
+| `pikete_queue_heartbeat(job_id, worker, progress, lease_seconds)` | Renueva una reserva válida y actualiza progreso |
+| `pikete_queue_finish(job_id, worker, outcome, error_code, retry_seconds)` | Cierra o reprograma trabajo bajo propiedad de la reserva |
 
-Si pegaste ya el `.env` desde Render, no necesitas repetirlo. **No subir el `.env` real a GitHub**; `.env.example` es una plantilla inocua.
+**Seguridad de las RPC:** se ejecutan como invocador (`SECURITY INVOKER`) y `EXECUTE` está concedido solo a `service_role`. Se comprueba la propiedad y vigencia de cada reserva antes de renovarla o terminarla.
 
-## Verificar
-1. Abre https://plaka-pikete-worker.onrender.com/health ; debe mostrar la versión `pikete-render-b-0.3.0` y modo `supabase-auth-check`.
-2. PowerShell: sustituye `WORKER_KEY_ACTUAL` por la clave de tu variable `PIKETE_WORKER_KEY` si deseas probar las conexiones:
+## Paso 1: actualizar el mismo repositorio de GitHub
 
-```powershell
-$headers = @{ Authorization = 'Bearer WORKER_KEY_ACTUAL' }
-try {
-  Invoke-RestMethod 'https://plaka-pikete-worker.onrender.com/api/supabase/check' -Headers $headers | ConvertTo-Json -Depth 5
-} catch {
-  if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message }
-  else { $_.Exception.Message }
-}
-```
+1. Descarga y descomprime este ZIP.
+2. Abre https://github.com/Eduardolv02/plaka-pikete-worker.
+3. Usa **Add file → Upload files** y sube todos los archivos descomprimidos, manteniendo las carpetas `src`, `tests` y `sql`.
+4. GitHub debe reemplazar `server.mjs`, `package.json` y `README.md`, y añadir `src/pikete-queue.mjs`, `tests/pikete-queue.test.mjs` y el SQL de migración.
+5. Pulsa **Commit changes** y espera el despliegue automático en Render.
 
-Respuesta esperada: `"ok":true` y **B** y **C** con `"state":"authenticated_rest_api"` y `"http_status":200`.
-- `not_configured`: Render no ve la URL o clave de ese nodo.
-- `invalid_key_format`: valor que no comienza con `sb_secret_` o se pegó cortado.
-- `unauthorized_key` (401): proyecto/clave no coinciden, fue deshabilitada o faltan permisos de autenticación.
-- `forbidden` (403): la clave no tiene acceso al endpoint.
-- `timeout` / `network_error`: problema de red.
+**No hace falta ejecutar el SQL de la carpeta `sql`: ya se aplicó a B y C.** Lo incluimos para mantener la migración documentada en el repositorio y para poder reproducirla en el futuro.
 
-## Límite de este hito
-Este resultado verifica **autenticación del proyecto y comunicación con su REST API**, pero NO garantiza que existan tablas de Pikete ni prueba lectura de filas. Las colas y sus permisos llegarán en el siguiente hito, mediante migración SQL específica para bases secundarias. No copiar las referencias a `auth.users` del esquema principal a los proyectos B/C.
+## Paso 2: verificar Render B
 
-Ejecuta `npm test` desde Node.js 20+ para las pruebas automáticas.
+Abre https://plaka-pikete-worker.onrender.com/health.
+
+Debes ver la versión `pikete-render-b-0.4.0` y modo `queue-rpc-ready`.
+
+## Paso 3: diagnóstico privado de las colas
+
+Con la misma clave `PIKETE_WORKER_KEY` ya configurada en Render, llama a:
+
+`GET https://plaka-pikete-worker.onrender.com/api/queue/status`
+
+Usa el encabezado `Authorization: Bearer <PIKETE_WORKER_KEY>`.
+
+Resultado esperado para ambas colas recién creadas: `state: ready`, `counts.total: 0`, `polling: disabled`.
+
+**No se requiere ninguna variable nueva para este paso.** `PIKETE_QUEUE_MUTATIONS_ENABLED` permanece desactivada por defecto.
+
+## Rutas privadas añadidas
+
+- `GET /api/queue/status`: resumen de B y C (no muta datos).
+- `POST /api/queue/claim`: reserva trabajos (bloqueada por defecto).
+- `POST /api/queue/heartbeat`: renueva reserva (bloqueada por defecto).
+- `POST /api/queue/finish`: finaliza o reintenta (bloqueada por defecto).
+
+Para habilitar **más adelante** las operaciones de escritura desde el backend, configura **`PIKETE_QUEUE_MUTATIONS_ENABLED=true`** solo cuando el Gateway y el procesador estén preparados y hayamos probado los flujos. No activar ahora.
+
+## Qué falta para reproducir canciones compartidas
+
+1. Gateway B: comprobar JWT del Supabase A, autorización y asignación estable de usuario/playlist al nodo B o C.
+2. Productor de trabajos desde app/Gateway, con deduplicación.
+3. Procesador efectivo que haga normalización, coincidencia de catálogo y revisión de derechos; nunca marcar un audio como compartible sin comprobaciones.
+4. Archivado y enlaces de reproducción con autorización.
+5. Pruebas de concurrencia, capacidad y funcionamiento desde Cuba.
+
+## Tests
+
+`npm test` (Node 20+).

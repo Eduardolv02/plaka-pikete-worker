@@ -3,10 +3,11 @@ import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { checkBothSupabaseNodes } from './src/supabase-probe.mjs';
 import { checkAuthenticatedNodes } from './src/supabase-authenticated.mjs';
+import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQueueJob } from './src/pikete-queue.mjs';
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-0.3.0';
+const version = 'pikete-render-b-0.4.0';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -66,8 +67,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: 'plaka-pikete-render-b',
         version,
-        mode: 'supabase-auth-check',
-        note: 'Supabase B/C: diagnostico de credenciales API listo. Sin colas activas.'
+        mode: 'queue-rpc-ready',
+        note: 'RPC colas B/C disponibles; procesamiento automatico desactivado.'
       });
     }
     if (req.method === 'GET' && path === '/api/supabase/check') {
@@ -81,6 +82,22 @@ const server = http.createServer(async (req, res) => {
       const reachable = result.checks.every(x => x.state === 'reachable' || x.state === 'reachable_auth_restricted');
       return reply(res, reachable ? 200 : 503, {...result, ok:reachable});
     }
+    if (req.method === 'GET' && path === '/api/queue/status') {
+      if (!authorizeOrReply(req, res)) return;
+      const result = await getQueueSummary();
+      return reply(res, result.ok ? 200 : 503, result);
+    }
+    const queueActions = {
+      '/api/queue/claim': claimQueueJobs,
+      '/api/queue/heartbeat': heartbeatQueueJob,
+      '/api/queue/finish': finishQueueJob,
+    };
+    if (req.method === 'POST' && Object.hasOwn(queueActions, path)) {
+      if (!authorizeOrReply(req, res)) return;
+      const body = await readJson(req);
+      const result = await queueActions[path](body);
+      return reply(res, 200, result);
+    }
     if (req.method === 'POST' && path === '/api/normalize') {
       if (!authorizeOrReply(req, res)) return;
       const body = await readJson(req);
@@ -89,6 +106,7 @@ const server = http.createServer(async (req, res) => {
     }
     return reply(res, 404, {ok:false,code:'not_found'});
   } catch (err) {
+    if (err instanceof QueueError) return reply(res, err.status, {ok:false,code:err.code});
     if (err?.status === 400 || err?.status === 413) return reply(res, err.status, {ok:false,code:err.message});
     console.error('request_failed', err?.name || 'unexpected');
     if (!res.headersSent && !res.destroyed) reply(res, 500, {ok:false,code:'internal_error'});

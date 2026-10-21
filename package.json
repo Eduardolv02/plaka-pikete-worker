@@ -1,9 +1,9 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Pikete Render B: verificacion REST autenticada de Supabase B/C",
+  "description": "Pikete Render B: colas RPC en Supabase B/C con leasing atomico",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"
