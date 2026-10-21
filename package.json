@@ -1,0 +1,12 @@
+{
+  "name": "plaka-pikete-render-b",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pikete: nodo de procesamiento separado del servicio principal de Plaka.",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  },
+  "engines": {"node": ">=20"}
+}
