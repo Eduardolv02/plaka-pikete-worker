@@ -32,7 +32,7 @@ export function requireMutationsEnabled(env = process.env) {
 }
 
 export async function callQueueRpc(node, functionName, payload, options = {}) {
-  if (!['pikete_queue_status', 'pikete_queue_claim', 'pikete_queue_finish', 'pikete_queue_heartbeat', 'pikete_queue_record_normalization', 'pikete_queue_record_match'].includes(functionName))
+  if (!['pikete_queue_status', 'pikete_queue_claim', 'pikete_queue_finish', 'pikete_queue_heartbeat', 'pikete_queue_record_normalization', 'pikete_queue_record_match', 'pikete_attach_verified_audio'].includes(functionName))
     throw new QueueError('unknown_queue_rpc');
   const {origin, secret} = getNodeConfig(node, options.env);
   const fetchImpl = options.fetchImpl || fetch;

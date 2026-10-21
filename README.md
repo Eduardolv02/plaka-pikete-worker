@@ -1,54 +1,44 @@
-# PLAKA PIKETE · Render B v0.7.0 — Identificación + catálogo completo
+# PLAKA PIKETE · Render B v0.9.0 — búsqueda de grabaciones y archivo Telegram
 
-**Actualización integral sobre v0.6.0.** Mantiene el normalizador, las colas, las invitaciones (gestionadas por Cloudflare B), las listas y el procesamiento por tick. No descarga música externa ni sube a Telegram. Reutiliza los IDs publicados de Plaka A.
+Entrega integrada con Cloudflare B v1.6.0 y Android Plaka 2.5.0.
 
-## Nuevas funciones
+## Funcionalidad
 
-- Búsqueda **paginada** del catálogo de `plaka_tracks` publicado, sin depender de las primeras 30 publicaciones del feed de Cloudflare A.
-- Resolución por **ID exacto de Plaka**. Solo devuelve `eligible=true` cuando el registro sigue publicado, tiene `rights_attested=true` y está vinculado al archivo Telegram de Plaka existente. Un enlace de reproducción real lo resuelve el reproductor Android por el Gateway A.
-- Detección de duplicados **solo por hash SHA-256 idéntico** cuando existe; títulos iguales NO prueban que dos audios sean iguales.
-- Un trabajo `match` adicional por referencia externa normalizada. Compara candidato artista/título, variantes (`live`, `remix`, etc.), duración y puntúa coincidencias. Nunca activa el audio únicamente por texto.
-- `POST /api/catalog/search` privado, body `{"query":"Daft Punk","page":0}`; respuesta incluye 25 canciones por página y `has_more`.
-- `POST /api/catalog/track` privado, body `{"track_id":"uuid-de-plaka"}`; verifica publicación, archivo y atestación del artista.
+- Solo el **propietario** de la lista cambia canciones (validación real en Cloudflare B). Los participantes siguen pudiendo aceptar invitaciones, leer la lista y vincular una copia local privada.
+- Android exige confirmar explícitamente **título y artista** al incorporar un tema local. El Gateway almacena `metadata_confirmed_at` y el normalizador verifica título, artista, variantes y duración.
+- Render B busca candidatos musicales mediante el **YouTube Data API v3** (`search.list` y `videos.list`); guarda título, canal y duración en metadatos, para revisión. **No descarga audio de YouTube.**
+- Si el propietario dispone de una copia MP3/M4A que puede distribuir, la autoriza expresamente y puede cargarla al archivo privado de Telegram. Render B calcula SHA-256, reutiliza copias idénticas, asigna hasta 4 bots de almacenamiento y guarda solamente el `file_id` y el slot en Supabase B/C.
+- Cloudflare B genera enlaces de reproducción firmados para propietarios e invitados activos. El Gateway transmite los bytes desde Telegram sin filtrar el token del bot. Media3 reproduce usando una URI estable que se resuelve justo al empezar.
 
-## Variable nueva OBLIGATORIA para buscar el catálogo completo
+## Dependencias de la implementación
 
-Render → `plaka-pikete-worker` → Environment:
+Supabase B y C deben tener aplicada `sql/007_pikete_owner_audio_archive.sql` (la migración se aplicó a ambas durante la preparación). No es necesario ejecutar SQL otra vez.
 
-`PIKETE_SUPABASE_A_SECRET_KEY=sb_secret_...`
+Variables nuevas de **Render**:
 
-Obtenerla en el Supabase **PRINCIPAL**, proyecto `nfmdkhmjjmkhlyhkgfow`, **Project Settings → API Keys → Secret keys**. Esta variable se configura exclusivamente en Render, **NUNCA se introduce en Android ni en el repositorio GitHub**. Las variables existentes para Supabase B/C y `PIKETE_WORKER_KEY` se conservan.
+- `PIKETE_YOUTUBE_DATA_API_KEY`: clave del YouTube Data API v3, opcional para búsqueda; si falta, las canciones siguen normalizándose.
+- `PIKETE_TG_BOT_1_TOKEN`: token del primer bot creado en @BotFather.
+- `PIKETE_TG_BOT_1_CHAT_ID`: ID de un canal/chat privado donde el bot tenga permisos de publicar audio.
+- Repite con los sufijos `_2_`, `_3_`, `_4_` si agregas más bots; cada bot tiene su propio canal o acceso a un canal común.
+- `PIKETE_ARCHIVE_UPLOADS_ENABLED=true`: habilita subir copias autorizadas. Mantén `false` hasta configurar bots/canales.
 
-> Las tablas del Supabase principal no se cambian. Esta consulta requiere un acceso de backend a su API REST porque el rol `anon` no tiene permisos de SELECT sobre `plaka_tracks`.
+Mantén las variables existentes `PIKETE_WORKER_KEY`, `PIKETE_SUPABASE_B_URL`, `PIKETE_SUPABASE_B_SECRET_KEY`, `PIKETE_SUPABASE_C_URL`, `PIKETE_SUPABASE_C_SECRET_KEY`, `PIKETE_SUPABASE_A_SECRET_KEY`, `PIKETE_QUEUE_MUTATIONS_ENABLED=true`, `PIKETE_PROCESSOR_ENABLED=true`.
 
-## Orden de publicación
+En Cloudflare B configura `PIKETE_TG_BOT_1_TOKEN` (y los demás tokens usados en Render), más `PIKETE_PLAYBACK_SIGNING_KEY`: cadena aleatoria de 32 caracteres o más. También conserva las variables existentes del Gateway.
 
-1. Configurar `PIKETE_SUPABASE_A_SECRET_KEY` en Render.
-2. Subir todo este ZIP descomprimido al GitHub `Eduardolv02/plaka-pikete-worker`, sobre el contenido existente. Render despliega v0.7.0.
-3. Actualizar Cloudflare Gateway B con su paquete v1.4.0.
-4. Instalar Android Plaka 2.4.8 para la interfaz de búsqueda y escucha compartida.
-5. **Tras confirmar que Render está en v0.7.0 y la nueva clave funciona**, aplicar a Supabase B y C la migración **`sql/006_pikete_catalog_match_activate.sql`**, una sola vez, para empezar a crear trabajos `match` automáticamente. ChatGPT puede aplicarla directamente, sin que tengas que copiar SQL.
+## Endpoints internos
 
-La migración `sql/005_pikete_catalog_match.sql` **YA ESTÁ INSTALADA en B y C**: índice parcial y RPC para registrar candidatos. NO volver a ejecutarla.
+`POST /api/archive/ingest` solo para Cloudflare B, con `Authorization: Bearer <PIKETE_WORKER_KEY>`, tipo MP3 o MP4-audio, longitud explícita (`X-Pikete-Audio-Length`) e identidad del propietario y de la lista verificados previamente en el Gateway. Render vuelve a comprobar la propiedad en Supabase antes de subir nada a Telegram.
 
-La migración `006` todavía no se ha aplicado, deliberadamente: v0.6.0 marca los trabajos de tipo `match` como no soportados. Se activa solamente después del despliegue nuevo.
+`POST /api/queue/process-once` sigue procesando normalizaciones y coincidencias. En metadata normalizada aparece `youtube_search`, siempre con `requires_confirmation=true`.
 
-## Comprobaciones
+## Límites
 
-- `GET https://plaka-pikete-worker.onrender.com/health` → `pikete-render-b-0.7.0`, `catalog-identification`.
-- `GET https://plaka-pikete-gateway.plakaplayeroficial.workers.dev/health` → `pikete-gateway-b-1.4.0`, `catalog-linking`.
-- Busca un título real en la pantalla Android: debe aparecer el catálogo publicado.
-- Una referencia externa seguirá en `matching` hasta elegir el ID exacto si hay ambigüedad o coincidencia por metadatos.
-- Un ID publicado elegible genera item `source_type=plaka`, `state=ready`, `rights_status=cleared`. La app usa el mismo `PlakaCloudConfig.playUri` y Media3 que la biblioteca.
+- 19 MiB por archivo, MP3 o M4A: el bot estándar permite más al enviar, pero `getFile` en Bot API estándar tiene límite de descarga de 20 MB, por eso se guarda margen.
+- No se hace modificación de volumen ni transcodificación del audio; «normalización» significa identificar y validar metadatos. No se garantiza equivalencia acústica usando solo títulos.
+- La búsqueda de YouTube no es autorización de descarga. El propietario proporciona un archivo distribuible y confirma su permiso antes del archivo.
+- El servicio no crea bots/canales ni configura Google Cloud Console automáticamente: esas acciones se realizan en las cuentas correspondientes.
 
-## Limitaciones honestas
+## Pruebas
 
-1. `rights_attested` refleja la declaración del artista en Plaka, no una revisión jurídica independiente.
-2. Los metadatos de una URL externa no son una huella de audio. Nunca damos por identificado un remix, directo u otra grabación distinta solo por título.
-3. La búsqueda online por página funciona desde el servidor y requiere conexión, no es catálogo offline.
-4. La búsqueda de **candidatos automáticos** recupera hasta 600 títulos por búsqueda y marca `incomplete_search=true` si alcanza ese límite. La búsqueda interactiva del catálogo es paginada.
-5. La reproducción de temas de Plaka utiliza el archivo Telegram ya asociado al ID; si está temporalmente inaccesible, Media3 mostrará el error normal del reproductor.
-
-## Tests
-
-`npm test` (Node 20+). En esta entrega han pasado 53 pruebas del servidor Render, más 44 del Gateway B.
+`npm test`, `node --check server.mjs`.

@@ -4,13 +4,14 @@ import { normalizeMetadata } from './src/normalize.mjs';
 import { inspectRecording } from './src/normalization-service.mjs';
 import { searchCatalog, getCatalogTrack } from './src/plaka-catalog.mjs';
 import { processQueueTick } from './src/pikete-processor.mjs';
+import { ingestOwnerAudio, MAX_AUDIO_BYTES } from './src/telegram-archive.mjs';
 import { checkBothSupabaseNodes } from './src/supabase-probe.mjs';
 import { checkAuthenticatedNodes } from './src/supabase-authenticated.mjs';
 import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQueueJob } from './src/pikete-queue.mjs';
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-0.8.0';
+const version = 'pikete-render-b-0.9.0';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -70,8 +71,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: 'plaka-pikete-render-b',
         version,
-        mode: 'local-metadata-matching',
-        note: 'Normalizacion de biblioteca local, busqueda catalogo A y coincidencias. Sin subir archivos locales.'
+        mode: 'owner-audio-telegram-archive',
+        note: 'Solo propietarios administran pistas; YouTube como busqueda de metadatos; archivo de audios autorizados mediante bots Telegram.'
       });
     }
     if (req.method === 'GET' && path === '/api/supabase/check') {
@@ -100,6 +101,23 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const result = await queueActions[path](body);
       return reply(res, 200, result);
+    }
+    if (req.method === 'POST' && path === '/api/archive/ingest') {
+      if (!authorizeOrReply(req, res)) return;
+      if (req.headers['x-pikete-rights-confirm'] !== 'true')
+        return reply(res, 403, {ok:false,code:'archive_rights_confirmation_required'});
+      const contentType=(req.headers['content-type']||'').split(';')[0].trim().toLowerCase();
+      const length=Number(req.headers['x-pikete-audio-length']||req.headers['content-length']||0);
+      if(!Number.isInteger(length)||length<512||length>MAX_AUDIO_BYTES)
+        return reply(res,413,{ok:false,code:'invalid_archive_audio_size'});
+      const result=await ingestOwnerAudio({
+        node:req.headers['x-pikete-node'],
+        playlistId:req.headers['x-pikete-playlist-id'],
+        itemId:req.headers['x-pikete-item-id'],
+        ownerId:req.headers['x-pikete-owner-user-id'],
+        mime:contentType,length,stream:req
+      });
+      return reply(res,200,result);
     }
     if (req.method === 'POST' && path === '/api/queue/process-once') {
       if (!authorizeOrReply(req, res)) return;
@@ -138,6 +156,6 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent && !res.destroyed) reply(res, 500, {ok:false,code:'internal_error'});
   }
 });
-server.requestTimeout = 15000;
+server.requestTimeout = 120000;
 server.headersTimeout = 10000;
 server.listen(port, '0.0.0.0', () => console.log(`${version} listening on ${port}`));

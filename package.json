@@ -1,6 +1,6 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "Pikete: normalizacion y busqueda completa del catalogo Plaka A",
