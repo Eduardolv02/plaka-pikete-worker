@@ -1,12 +1,14 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Pikete Render B: normalizacion y conexion de diagnostico Supabase B/C",
+  "description": "Pikete Render B: verificacion REST autenticada de Supabase B/C",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"
   },
-  "engines": {"node": ">=20 <27"}
+  "engines": {
+    "node": ">=20 <27"
+  }
 }

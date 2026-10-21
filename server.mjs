@@ -2,10 +2,11 @@ import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { checkBothSupabaseNodes } from './src/supabase-probe.mjs';
+import { checkAuthenticatedNodes } from './src/supabase-authenticated.mjs';
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-0.2.0';
+const version = 'pikete-render-b-0.3.0';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -65,14 +66,20 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: 'plaka-pikete-render-b',
         version,
-        mode: 'supabase-connectivity',
-        note: 'Supabase B/C: comprobacion de conectividad bajo autenticacion. Sin colas activas.'
+        mode: 'supabase-auth-check',
+        note: 'Supabase B/C: diagnostico de credenciales API listo. Sin colas activas.'
       });
     }
     if (req.method === 'GET' && path === '/api/supabase/check') {
       if (!authorizeOrReply(req, res)) return;
-      const result = await checkBothSupabaseNodes();
+      const result = await checkAuthenticatedNodes();
       return reply(res, result.ok ? 200 : 503, result);
+    }
+    if (req.method === 'GET' && path === '/api/supabase/network') {
+      if (!authorizeOrReply(req, res)) return;
+      const result = await checkBothSupabaseNodes();
+      const reachable = result.checks.every(x => x.state === 'reachable' || x.state === 'reachable_auth_restricted');
+      return reply(res, reachable ? 200 : 503, {...result, ok:reachable});
     }
     if (req.method === 'POST' && path === '/api/normalize') {
       if (!authorizeOrReply(req, res)) return;
