@@ -6,6 +6,7 @@ import { getNodeConfig, callQueueRpc, requireMutationsEnabled, QueueError } from
 import { inspectRecording } from './normalization-service.mjs';
 import { matchCatalogMetadata } from './plaka-catalog.mjs';
 import { findYoutubeCandidates } from './youtube-discovery.mjs';
+import { lookupArchiveMetadata } from './archive-lookup.mjs';
 
 function validateInput(body, env) {
   requireMutationsEnabled(env);
@@ -112,6 +113,8 @@ export async function processOneJob(node,worker,job,options={}) {
     // Official YouTube API: search and compare, never infer a right to download from a title.
     if (item.source_type === 'local') {
       metadata.youtube_search=await findYoutubeCandidates(metadata,opts);
+      metadata.archive_lookup=await lookupArchiveMetadata({artist:metadata.artist_candidate,
+        title:metadata.title_candidate,durationMs:metadata.duration_ms},opts);
     }
     const outcome=await callQueueRpc(node,'pikete_queue_record_normalization',{
       p_job_id:job.id,p_worker:worker,p_outcome:'done',p_metadata:metadata,p_error_code:null

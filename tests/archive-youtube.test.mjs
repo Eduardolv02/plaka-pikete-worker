@@ -23,7 +23,7 @@ test('YouTube discovery uses official API for metadata only and validates durati
    if(url.includes('/search?'))return json({items:[{id:{videoId:'abcdefghijk'},snippet:{title:'Daft Punk - One More Time',channelTitle:'Daft Punk'}}]});
    return json({items:[{id:'abcdefghijk',contentDetails:{duration:'PT5M20S'}}]});
   }});
- assert.equal(result.status,'candidates_for_review');assert.equal(result.can_download,false);
+ assert.equal(result.status,'high_confidence_metadata');assert.equal(result.can_download,false);
  assert.equal(result.candidates[0].duration_ms,320000);
  assert.equal(result.candidates[0].url,'https://www.youtube.com/watch?v=abcdefghijk');
  assert.equal(yt.toDurationMs('PT5M20S'),320000);

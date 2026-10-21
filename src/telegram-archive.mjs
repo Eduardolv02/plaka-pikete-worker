@@ -4,6 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import { QueueError, getNodeConfig, callQueueRpc } from './pikete-queue.mjs';
+import { recordingKey, lookupArchiveHash } from './archive-lookup.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export const MAX_AUDIO_BYTES = 19*1024*1024;
@@ -42,7 +43,7 @@ export async function verifyArchiveOwner(node,playlistId,itemId,ownerId,options=
   }), 'GET',undefined,options);
   if(playlist.length!==1)throw new QueueError('archive_owner_required',403);
   const items=await rest(node,'pikete_playlist_items',new URLSearchParams({
-    select:'id,source_type,artist,title,metadata_confirmed_at,normalization_status,archive_status,rights_status',
+    select:'id,source_type,artist,title,local_duration_ms,selected_youtube_video_id,metadata_confirmed_at,normalization_status,archive_status,rights_status',
     id:`eq.${itemId}`,playlist_id:`eq.${playlistId}`,limit:'1'
   }), 'GET',undefined,options);
   const item=items[0];
@@ -99,6 +100,11 @@ export async function ingestOwnerAudio({node,playlistId,itemId,ownerId,mime,leng
   let archive=(await rest(node,'pikete_audio_archive',new URLSearchParams({
     select:'sha256,bot_slot,telegram_file_id,mime_type',sha256:`eq.${hash}`,limit:'1'
   }),'GET',undefined,options))[0];
+  // Global exact-byte reuse across B and C. NEVER reuse on title alone.
+  if(!archive){
+    const shared=await lookupArchiveHash(hash,options);
+    if(shared)archive=shared;
+  }
   let reused=true;
   if(!archive){
     const bots=botConfig(env);
@@ -106,7 +112,10 @@ export async function ingestOwnerAudio({node,playlistId,itemId,ownerId,mime,leng
     const bot=bots[parseInt(hash.slice(0,2),16)%bots.length];
     const telegram=await saveToTelegram(bot,bytes,mime,item,options);
     const entry={sha256:hash,bot_slot:bot.slot,telegram_file_id:telegram.telegram_file_id,
-      telegram_file_unique_id:telegram.telegram_file_unique_id,mime_type:mime,bytes:bytes.length};
+      telegram_file_unique_id:telegram.telegram_file_unique_id,mime_type:mime,bytes:bytes.length,
+      normalized_key:recordingKey(item.artist,item.title),
+      duration_ms:Number.isInteger(item.local_duration_ms)?item.local_duration_ms:null,
+      source_video_id:item.selected_youtube_video_id||null};
     try{
       archive=(await rest(node,'pikete_audio_archive',new URLSearchParams({select:'sha256,bot_slot,telegram_file_id,mime_type'}),
         'POST',entry,options))[0];
@@ -119,7 +128,20 @@ export async function ingestOwnerAudio({node,playlistId,itemId,ownerId,mime,leng
     if(!archive)throw new QueueError('archive_store_failed',502);
     reused=false;
   }
-  const attached=await callQueueRpc(node,'pikete_attach_verified_audio',{
+  // Keep the global archive locator local to the playlist's shard if reused from the other shard.
+  // This is best-effort; the item itself still stores the exact bot slot + Telegram file_id.
+  if(archive.node && archive.node!==node){
+    try{
+      await rest(node,'pikete_audio_archive',new URLSearchParams({select:'sha256'}),'POST',{
+        sha256:hash,bot_slot:archive.bot_slot,telegram_file_id:archive.telegram_file_id,
+        mime_type:archive.mime_type,bytes:bytes.length,
+        normalized_key:recordingKey(item.artist,item.title),
+        duration_ms:Number.isInteger(item.local_duration_ms)?item.local_duration_ms:null,
+        source_video_id:item.selected_youtube_video_id||null
+      },options);
+    }catch(e){if(e.code!=='archive_collision')throw e;}
+  }
+  const attached=await callQueueRpc(node,'pikete_attach_verified_audio',{ 
     p_playlist_id:playlistId,p_item_id:itemId,p_owner_user_id:ownerId,
     p_bot_slot:archive.bot_slot,p_file_id:archive.telegram_file_id,p_sha256:archive.sha256,
     p_mime_type:archive.mime_type

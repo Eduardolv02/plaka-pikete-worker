@@ -1,5 +1,5 @@
 /** YouTube Data API discovery ONLY: never downloads/re-hosts YouTube media. */
-import { rankCatalogCandidates,compareKey } from './normalization-engine.mjs';
+import { analyzeRecording, rankCatalogCandidates, compareKey } from './normalization-engine.mjs';
 
 const VID=/^[A-Za-z0-9_-]{11}$/;
 function toDurationMs(iso) {
@@ -40,15 +40,48 @@ export async function findYoutubeCandidates(normalized,options={}) {
       duration_ms:durations.get(v.id.videoId)??null,
       url:`https://www.youtube.com/watch?v=${v.id.videoId}`
     }));
-    const scoreInput={...normalized,versions:Array.isArray(normalized.versions)?normalized.versions:[],
-      title_key:normalized.title_key||compareKey(normalized.title_candidate),
-      artist_key:normalized.artist_key||compareKey(normalized.artist_candidate)};
-    const ranked=rankCatalogCandidates(scoreInput,candidates.map(c=>({id:c.id,artist:c.channel,title:c.title,duration_ms:c.duration_ms})))
-      .filter(x=>typeof x.ref==='string');
-    const byId=new Map(candidates.map(c=>[c.id,c]));
-    return {status:'candidates_for_review',candidates:ranked.slice(0,5).map(x=>({
-      ...byId.get(x.ref),score:x.score,warning:'metadata_only_not_download_permission'
-    })),requires_confirmation:true,can_download:false};
+    const ranked=rankYoutubeCandidates(normalized,candidates);
+    const best=ranked[0],runner=ranked[1];
+    // Metadata confidence is NOT proof of audio identity, upload rights or ownership.
+    const exact=best && best.score>=0.92 && best.duration_delta_ms!==null &&
+      best.duration_delta_ms<=2000 && !best.version_mismatch &&
+      (!runner || best.score-runner.score>=0.1);
+    return {status:exact?'high_confidence_metadata':'candidates_for_review',
+      best_video_id:best?.video_id??null,
+      candidates:ranked.slice(0,5).map(c=>({...c,warning:'metadata_only_not_download_permission'})),
+      requires_confirmation:!exact, can_download:false};
   }catch{return {status:'temporarily_unavailable',candidates:[],requires_confirmation:true};}
+}
+/** YouTube channels often contain label names, not performing artist names.
+ * Prefer explicit 'Artist - Title' in the video title, while treating a named
+ * channel as a weaker clue. Penalize mismatched versions and durations.
+ */
+export function rankYoutubeCandidates(normalized,candidates){
+  const wantedArtist=compareKey(normalized.artist_candidate||'');
+  const wantedTitle=compareKey(normalized.title_candidate||'');
+  const wantedDuration=Number.isInteger(normalized.duration_ms)?normalized.duration_ms:null;
+  const wantedVersions=Array.isArray(normalized.versions)?normalized.versions:[];
+  return candidates.map(candidate=>{
+    const parsed=analyzeRecording({title:candidate.title,artist:''});
+    const raw=compareKey(candidate.title);
+    const parsedTitle=compareKey(parsed.title_candidate||'');
+    const parsedArtist=compareKey(parsed.artist_candidate||'');
+    const channel=compareKey(candidate.channel||'');
+    const directArtist=!!wantedArtist && (parsedArtist===wantedArtist || raw.startsWith(wantedArtist+' '));
+    const channelArtist=!!wantedArtist && (channel===wantedArtist || channel.startsWith(wantedArtist+' '));
+    const titleEqual=!!wantedTitle && (parsedTitle===wantedTitle || raw.includes(wantedTitle));
+    const titlePartial=!!wantedTitle && raw.split(' ').filter(x=>wantedTitle.split(' ').includes(x)).length>=Math.max(1,Math.ceil(wantedTitle.split(' ').length*.7));
+    const versions=parsed.ok?parsed.versions:[];
+    const versionMismatch=!!wantedVersions.length && wantedVersions.some(x=>!versions.includes(x)) ||
+      !!versions.length && versions.some(x=>!wantedVersions.includes(x));
+    const delta=wantedDuration!==null && Number.isInteger(candidate.duration_ms)?
+      Math.abs(wantedDuration-candidate.duration_ms):null;
+    let score=(titleEqual?.46:titlePartial?.20:0)+(directArtist?.31:channelArtist?.23:0);
+    if(delta!==null){score+=delta<=2000?.23:delta<=5000?.17:delta<=12000?.09:delta<=30000?.02:-.20;}
+    else score+=.03;
+    if(versionMismatch)score=Math.min(score,.5);
+    return {...candidate,score:Math.max(0,Math.min(1,Number(score.toFixed(3)))),
+      duration_delta_ms:delta,version_mismatch:versionMismatch};
+  }).sort((a,b)=>b.score-a.score || (a.duration_delta_ms??Infinity)-(b.duration_delta_ms??Infinity));
 }
 export const _test={toDurationMs};

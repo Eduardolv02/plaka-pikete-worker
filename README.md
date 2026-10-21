@@ -1,3 +1,5 @@
+**Actualización 1.0.0:** ver `LEEME_PIKETE_1_8.md` para las diferencias, prioridad y búsqueda cruzada B/C.
+
 # PLAKA PIKETE · Render B v0.9.0 — búsqueda de grabaciones y archivo Telegram
 
 Entrega integrada con Cloudflare B v1.6.0 y Android Plaka 2.5.0.

@@ -11,7 +11,7 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-0.9.0';
+const version = 'pikete-render-b-1.0.0';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -71,8 +71,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: 'plaka-pikete-render-b',
         version,
-        mode: 'owner-audio-telegram-archive',
-        note: 'Solo propietarios administran pistas; YouTube como busqueda de metadatos; archivo de audios autorizados mediante bots Telegram.'
+        mode: 'queue-priority-youtube-duration-archive-index',
+        note: 'Normaliza por pista, compara candidatos de YouTube, busca archivo indexado B/C y prioriza cuenta verificada.'
       });
     }
     if (req.method === 'GET' && path === '/api/supabase/check') {
