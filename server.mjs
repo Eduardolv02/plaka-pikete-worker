@@ -2,13 +2,14 @@ import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { inspectRecording } from './src/normalization-service.mjs';
+import { processQueueTick } from './src/pikete-processor.mjs';
 import { checkBothSupabaseNodes } from './src/supabase-probe.mjs';
 import { checkAuthenticatedNodes } from './src/supabase-authenticated.mjs';
 import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQueueJob } from './src/pikete-queue.mjs';
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-0.5.0';
+const version = 'pikete-render-b-0.6.0';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -68,8 +69,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: 'plaka-pikete-render-b',
         version,
-        mode: 'normalization-engine-preview',
-        note: 'Normalizador avanzado y consulta de colas B/C. Procesamiento automatico desactivado.'
+        mode: 'normalization-queue-ticks',
+        note: 'Colas B/C y normalizacion por tick. Sin descargas. Cron pendiente de configurar.'
       });
     }
     if (req.method === 'GET' && path === '/api/supabase/check') {
@@ -97,6 +98,12 @@ const server = http.createServer(async (req, res) => {
       if (!authorizeOrReply(req, res)) return;
       const body = await readJson(req);
       const result = await queueActions[path](body);
+      return reply(res, 200, result);
+    }
+    if (req.method === 'POST' && path === '/api/queue/process-once') {
+      if (!authorizeOrReply(req, res)) return;
+      const body = await readJson(req);
+      const result = await processQueueTick(body);
       return reply(res, 200, result);
     }
     if (req.method === 'POST' && path === '/api/normalize/inspect') {

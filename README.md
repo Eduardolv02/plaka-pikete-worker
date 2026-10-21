@@ -1,45 +1,35 @@
-# PLAKA PIKETE — Render B v0.5.0 · Motor de normalización (primera fase)
+# PLAKA PIKETE · Render B 0.6.0 · Pipeline de normalización
 
-## Objetivo
-
-Dejar de tratar las referencias externas como títulos libres. Separa la limpieza de metadatos, la identificación de versiones, las coincidencias con candidatos del catálogo y la comprobación de derechos. **No descarga, reproduce ni publica audio.**
+## Qué hace
+- Conecta las referencias externas de `pikete_playlist_items` con trabajos `pikete_jobs` creados por trigger SQL.
+- Un procesador HTTP de un solo lote reclama el trabajo mediante RPC atómica, lee el ítem, normaliza artista/título/versión, registra JSON estructurado y finaliza en la MISMA transacción SQL (sin marcar audio como compartible).
+- Reintenta fallos transitorios, envía entradas inválidas a revisión manual y respeta el lease.
+- Mantiene los endpoints previos y los dos nodos B y C.
 
 ## Instalación
+1. Subir este ZIP descomprimido a `Eduardolv02/plaka-pikete-worker`, sobrescribiendo los archivos y conservando la estructura `src`, `sql`, `tests`.
+2. Render desplegará automáticamente. Abrir `https://plaka-pikete-worker.onrender.com/health`: `pikete-render-b-0.6.0`.
+3. En Render **Environment** agregar `PIKETE_QUEUE_MUTATIONS_ENABLED=true` y `PIKETE_PROCESSOR_ENABLED=true` solo cuando estés listo para activar el procesamiento de metadatos. Las claves y URLs existentes se mantienen.
 
-1. Descomprimir ZIP y subir todos sus archivos al repositorio GitHub `Eduardolv02/plaka-pikete-worker` manteniendo las carpetas.
-2. Render realiza el despliegue automático (mismo servicio `plaka-pikete-worker`).
-3. Las variables existentes son suficientes. NO activar `PIKETE_QUEUE_MUTATIONS_ENABLED` todavía.
-4. Comprobar `https://plaka-pikete-worker.onrender.com/health`: versión `pikete-render-b-0.5.0` y modo `normalization-engine-preview`.
+## Migraciones SQL
+El archivo `sql/004_pikete_normalization_pipeline.sql` ya se aplicó a los Supabase B y C durante la preparación. **NO lo ejecutes otra vez.** La instalación fue aditiva y no modificó Supabase A.
 
-## Endpoint privado nuevo
+## Ruta nueva
+`POST /api/queue/process-once`
 
-`POST /api/normalize/inspect`, encabezado `Authorization: Bearer <PIKETE_WORKER_KEY>`, `Content-Type: application/json`.
+Autenticación: `Authorization: Bearer <PIKETE_WORKER_KEY>`
 
-### Ejemplo
+Ejemplo body: `{"node":"both","limit":2}` (máximo 3 por nodo por tick; colas consultadas B y C).
 
-```json
-{
-  "source_url": "https://youtu.be/dQw4w9WgXcQ",
-  "catalog_candidates": [
-    {"id":"track-1", "artist":"Rick Astley", "title":"Never Gonna Give You Up"},
-    {"id":"track-2", "artist":"Rick Astley", "title":"Never Gonna Give You Up (Live)"}
-  ]
-}
-```
+Retorna `nodes` con trabajos reclamados y sus resultados. **No descarga audio, no publica música, no genera enlaces de Telegram y no marca `ready`**. Los ítems normalizados quedan en `state='matching'`, `normalization_status='normalized'`, a la espera del cotejo de catálogo real y revisión de derechos.
 
-- Admite links HTTPS de YouTube, Spotify y SoundCloud; consulta **solo** metadatos oEmbed en dominios predefinidos.
-- Analiza variaciones: *live, remix, slowed, sped up, instrumental, acoustic, cover, remaster, demo, karaoke, radio edit*.
-- Distingue coincidencia por nombre, ambigüedad y conflicto de versión.
-- `catalog_candidates` es temporal y de **demostración**: todavía falta conectarlo a la búsqueda paginada del catálogo real, sin el límite del feed de 30 canciones.
-- **NUNCA** interpreta un título coincidente como confirmación de versión oficial o autorización de compartir.
-- `ready_to_share` siempre `false` hasta que tengamos procedencia comprobada y derechos.
+## Automatización
+Render Free puede suspenderse tras periodos de inactividad. El paquete separado de Cloudflare Gateway 1.3 incorpora un disparador puntual al añadir una referencia y compatibilidad con **Cron Trigger**, a configurar manualmente en Cloudflare. Con la automatización desactivada, puedes invocar esta ruta para procesar una tanda.
 
-## Próximo bloque integrado
+## Qué NO hace todavía
+- Búsqueda exhaustiva de tracks publicados en Supabase A, huellas de audio o comparación de ISRC con fuentes reales.
+- Descargar audio de enlaces externos, determinar derechos automáticamente o archivarlo en Telegram.
+- Marcar pistas como listas para la reproducción. Eso requiere validar archivo y permisos.
 
-1. Producir `pikete_jobs` al añadir una referencia a la lista (Gateway B).
-2. Consumir trabajos bajo reserva y reintentos de RPC actuales (Render B), guardar `normalized_metadata` y estado de coincidencia.
-3. Buscar de verdad en el catálogo completo y fuentes musicales de metadatos (búsqueda paginada/ISRC/huellas).
-4. Validar permisos de audio y evitar duplicados en Telegram cuando el material esté autorizado.
-5. Exponer el estado del trabajo en Android y permitir revisión manual cuando haya ambigüedad.
-
-No hay cambios en Supabase ni en Android en este ZIP. El endpoint `/api/normalize` original sigue disponible.
+## Tests
+`npm test` (44 pruebas verificadas).
