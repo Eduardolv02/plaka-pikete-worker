@@ -2,6 +2,7 @@ import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { inspectRecording } from './src/normalization-service.mjs';
+import { searchCatalog, getCatalogTrack } from './src/plaka-catalog.mjs';
 import { processQueueTick } from './src/pikete-processor.mjs';
 import { checkBothSupabaseNodes } from './src/supabase-probe.mjs';
 import { checkAuthenticatedNodes } from './src/supabase-authenticated.mjs';
@@ -9,7 +10,7 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-0.6.0';
+const version = 'pikete-render-b-0.8.0';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -69,8 +70,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: 'plaka-pikete-render-b',
         version,
-        mode: 'normalization-queue-ticks',
-        note: 'Colas B/C y normalizacion por tick. Sin descargas. Cron pendiente de configurar.'
+        mode: 'local-metadata-matching',
+        note: 'Normalizacion de biblioteca local, busqueda catalogo A y coincidencias. Sin subir archivos locales.'
       });
     }
     if (req.method === 'GET' && path === '/api/supabase/check') {
@@ -105,6 +106,17 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const result = await processQueueTick(body);
       return reply(res, 200, result);
+    }
+    if (req.method === 'POST' && path === '/api/catalog/search') {
+      if (!authorizeOrReply(req, res)) return;
+      const body = await readJson(req);
+      return reply(res, 200, await searchCatalog(body));
+    }
+    if (req.method === 'POST' && path === '/api/catalog/track') {
+      if (!authorizeOrReply(req, res)) return;
+      const body = await readJson(req);
+      const result = await getCatalogTrack(body?.track_id);
+      return reply(res, result.ok ? 200 : 404, result);
     }
     if (req.method === 'POST' && path === '/api/normalize/inspect') {
       if (!authorizeOrReply(req, res)) return;

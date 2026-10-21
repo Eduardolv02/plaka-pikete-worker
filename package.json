@@ -1,9 +1,9 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
-  "description": "Pikete Render B: colas RPC en Supabase B/C con leasing atomico",
+  "description": "Pikete: normalizacion y busqueda completa del catalogo Plaka A",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"
