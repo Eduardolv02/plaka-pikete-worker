@@ -5,13 +5,15 @@ import { inspectRecording } from './src/normalization-service.mjs';
 import { searchCatalog, getCatalogTrack } from './src/plaka-catalog.mjs';
 import { processQueueTick } from './src/pikete-processor.mjs';
 import { ingestOwnerAudio, MAX_AUDIO_BYTES } from './src/telegram-archive.mjs';
+import { ingestApprovedSource } from './src/approved-source.mjs';
+import { prepareLicensedItem, sweepLicensedItems } from './src/studio-auto-archive.mjs';
 import { checkBothSupabaseNodes } from './src/supabase-probe.mjs';
 import { checkAuthenticatedNodes } from './src/supabase-authenticated.mjs';
 import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQueueJob } from './src/pikete-queue.mjs';
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-1.0.0';
+const version = 'pikete-render-b-1.3.0-candidate';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -100,6 +102,22 @@ const server = http.createServer(async (req, res) => {
       if (!authorizeOrReply(req, res)) return;
       const body = await readJson(req);
       const result = await queueActions[path](body);
+      return reply(res, 200, result);
+    }
+    if (req.method === 'POST' && path === '/api/archive/auto-item') {
+      if (!authorizeOrReply(req,res)) return;
+      const data=await readJson(req);
+      return reply(res,200,await prepareLicensedItem(data));
+    }
+    if (req.method === 'POST' && path === '/api/archive/auto-sweep') {
+      if (!authorizeOrReply(req,res)) return;
+      const data=await readJson(req);
+      return reply(res,200,await sweepLicensedItems(data));
+    }
+    if (req.method === 'POST' && path === '/api/archive/ingest-approved-source') {
+      if (!authorizeOrReply(req, res)) return;
+      const body = await readJson(req);
+      const result = await ingestApprovedSource(body);
       return reply(res, 200, result);
     }
     if (req.method === 'POST' && path === '/api/archive/ingest') {

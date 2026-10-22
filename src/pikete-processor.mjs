@@ -7,6 +7,8 @@ import { inspectRecording } from './normalization-service.mjs';
 import { matchCatalogMetadata } from './plaka-catalog.mjs';
 import { findYoutubeCandidates } from './youtube-discovery.mjs';
 import { lookupArchiveMetadata } from './archive-lookup.mjs';
+import { lookupMusicBrainz } from './musicbrainz-discovery.mjs';
+import { decideRecordingIdentity } from './recording-identity.mjs';
 
 function validateInput(body, env) {
   requireMutationsEnabled(env);
@@ -110,12 +112,15 @@ export async function processOneJob(node,worker,job,options={}) {
     } catch(e) {
       metadata.catalog_match={status:'temporarily_unavailable',candidates:[],requires_confirmation:true};
     }
+    // MusicBrainz recording identity supports cross-user dedupe but is metadata-only.
+    metadata.musicbrainz=await lookupMusicBrainz(metadata,opts);
     // Official YouTube API: search and compare, never infer a right to download from a title.
     if (item.source_type === 'local') {
       metadata.youtube_search=await findYoutubeCandidates(metadata,opts);
       metadata.archive_lookup=await lookupArchiveMetadata({artist:metadata.artist_candidate,
         title:metadata.title_candidate,durationMs:metadata.duration_ms},opts);
     }
+    metadata.recording_identity=decideRecordingIdentity(metadata);
     const outcome=await callQueueRpc(node,'pikete_queue_record_normalization',{
       p_job_id:job.id,p_worker:worker,p_outcome:'done',p_metadata:metadata,p_error_code:null
     },opts);

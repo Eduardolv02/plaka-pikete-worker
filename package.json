@@ -1,9 +1,9 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "Pikete: normalizacion y busqueda completa del catalogo Plaka A",
+  "description": "Pikete: identidad MusicBrainz + catalogo Plaka + archivo de audio con hash",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test"
