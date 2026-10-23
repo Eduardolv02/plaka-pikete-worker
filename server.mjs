@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {spawnSync} from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
@@ -16,8 +17,14 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-1.4.1-discovery-recovery';
+const version = 'pikete-render-b-1.4.2-one-click-licensed';
 const maxBodyBytes = 8192;
+function ytDlpAvailable(){
+  const cmd=process.env.PIKETE_YTDLP_BIN||'yt-dlp';
+  if(!/^(?:yt-dlp|\/app\/\.venv\/bin\/yt-dlp)$/.test(cmd))return false;
+  const r=spawnSync(cmd,['--version'],{timeout:4000,encoding:'utf8',stdio:['ignore','pipe','ignore']});
+  return !r.error && r.status===0;
+}
 
 function reply(res, status, obj) {
   const body = JSON.stringify(obj);
@@ -80,7 +87,7 @@ const server = http.createServer(async (req, res) => {
         youtube_discovery: 'yt-dlp',
         discovery: {
           search_enabled: process.env.PIKETE_YTDLP_SEARCH_ENABLED === 'true',
-          docker_ytdlp_binary_detected: existsSync('/app/.venv/bin/yt-dlp'),
+          docker_ytdlp_binary_detected: ytDlpAvailable(),
           ffmpeg_binary_detected: existsSync('/usr/bin/ffmpeg'),
           processor_enabled: process.env.PIKETE_PROCESSOR_ENABLED === 'true',
           queue_mutations_enabled: process.env.PIKETE_QUEUE_MUTATIONS_ENABLED === 'true'

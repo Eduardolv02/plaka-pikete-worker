@@ -3,6 +3,7 @@
  */
 import {QueueError,getNodeConfig} from './pikete-queue.mjs';
 import {findYoutubeCandidates} from './youtube-discovery.mjs';
+import {autoArchivePreapproved} from './one-click-licensed.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const busy=new Set();
 async function rows(node,params,options={}){
@@ -46,6 +47,11 @@ export async function refreshYoutubeItem(input,options={}){
   });}catch{throw new QueueError('refresh_write_unreachable',503);}
   if(!response.ok)throw new QueueError('refresh_write_failed',502);
   const saved=await response.json();
+  // Recover already-normalized songs without opening an Android confirmation form.
+  if (Array.isArray(saved) && saved.length===1 && foundCandidates) {
+    try {await autoArchivePreapproved(node,itemId,updated,options);}
+    catch(e) {console.warn('pikete_one_click_recovery_unavailable',typeof e?.code==='string'?e.code:'archive_service_error');}
+  }
   return {ok:true,status:Array.isArray(saved)&&saved.length===1?result.status:'skipped_concurrent_update',
     candidates:foundCandidates?result.candidates.length:0};
 }

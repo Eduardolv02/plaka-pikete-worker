@@ -9,6 +9,7 @@ import { findYoutubeCandidates } from './youtube-discovery.mjs';
 import { lookupArchiveMetadata } from './archive-lookup.mjs';
 import { lookupMusicBrainz } from './musicbrainz-discovery.mjs';
 import { decideRecordingIdentity } from './recording-identity.mjs';
+import {autoArchivePreapproved} from './one-click-licensed.mjs';
 
 function validateInput(body, env) {
   requireMutationsEnabled(env);
@@ -125,6 +126,12 @@ export async function processOneJob(node,worker,job,options={}) {
       p_job_id:job.id,p_worker:worker,p_outcome:'done',p_metadata:metadata,p_error_code:null
     },opts);
     if(!outcome || outcome.ok!==true) throw new QueueError('lease_lost',409);
+    // One-click archival only for operator-licensed, high-confidence recordings.
+    // Never fail normalization if automatic archival is unavailable.
+    if (item.source_type==='local' && job.playlist_item_id) {
+      try {await autoArchivePreapproved(node,job.playlist_item_id,metadata,opts);}
+      catch(e) {console.warn('pikete_one_click_unavailable',typeof e?.code==='string'?e.code:'archive_service_error');}
+    }
     return {job_id:job.id,outcome:'done',item_id:job.playlist_item_id,
       match_status:metadata.match_status,ready_to_share:false};
   } catch(e) {
