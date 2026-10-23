@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { processQueueTick,getItemForNormalization } from '../src/pikete-processor.mjs';
 const env={PIKETE_SUPABASE_B_URL:'https://cpdklixfmiibrcptleir.supabase.co',
- PIKETE_SUPABASE_B_SECRET_KEY:'sb_secret_01234567890123456789012345',
+ PIKETE_SUPABASE_B_SECRET_KEY:'sb_secret_' + 'A'.repeat(32),
  PIKETE_QUEUE_MUTATIONS_ENABLED:'true',PIKETE_PROCESSOR_ENABLED:'true'};
 test('processor refuses to mutate when feature disabled',async()=>{
  await assert.rejects(processQueueTick({node:'B',limit:1},{env:{...env,PIKETE_PROCESSOR_ENABLED:'false'}}),

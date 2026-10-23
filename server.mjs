@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { existsSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { inspectRecording } from './src/normalization-service.mjs';
@@ -15,7 +16,7 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-1.4.0-ytdlp';
+const version = 'pikete-render-b-1.4.1-discovery-recovery';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -77,6 +78,13 @@ const server = http.createServer(async (req, res) => {
         version,
         mode: 'queue-priority-ytdlp-search-licensed-telegram-archive',
         youtube_discovery: 'yt-dlp',
+        discovery: {
+          search_enabled: process.env.PIKETE_YTDLP_SEARCH_ENABLED === 'true',
+          docker_ytdlp_binary_detected: existsSync('/app/.venv/bin/yt-dlp'),
+          ffmpeg_binary_detected: existsSync('/usr/bin/ffmpeg'),
+          processor_enabled: process.env.PIKETE_PROCESSOR_ENABLED === 'true',
+          queue_mutations_enabled: process.env.PIKETE_QUEUE_MUTATIONS_ENABLED === 'true'
+        },
         youtube_archive_policy: 'operator_allowlist',
         note: 'Normaliza por pista, compara candidatos de YouTube, busca archivo indexado B/C y prioriza cuenta verificada.'
       });

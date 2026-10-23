@@ -59,7 +59,7 @@ test('malicious IDs and denied environment flags fail closed',async()=>{
 });
 test('recover stale candidates and restore needs_confirmation without touching ready items',async()=>{
  const trace=[];
- const item={...eligible,selected_youtube_video_id:null,archive_status:'none',normalized_metadata:{...norm,youtube_search:{status:'not_configured',candidates:[]}}};
+ const item={...eligible,selected_youtube_video_id:null,archive_status:'none',preparation_status:'needs_confirmation',youtube_confirmed_at:null,normalized_metadata:{...norm,youtube_search:{status:'not_configured',candidates:[]}}};
  const r=await refreshYoutubeItem({node:'B',item_id:IID},{env,fetchImpl:fetchDb(item,trace),
  findYoutubeCandidates:async()=>({status:'candidates_for_review',candidates:[{video_id:'abcdefghijk'}]})});
  assert.equal(r.status,'candidates_for_review');

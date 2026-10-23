@@ -22,7 +22,7 @@ export async function refreshYoutubeItem(input,options={}){
   const found=await rows(node,{select:'id,playlist_id,source_type,artist,title,local_duration_ms,normalized_metadata,normalization_status,preparation_status,archive_status,selected_youtube_video_id',id:`eq.${itemId}`,limit:'1'},options);
   const item=found[0];
   if(!item)return {ok:false,status:'not_found'};
-  if(item.archive_status==='ready'||item.selected_youtube_video_id||item.normalization_status!=='normalized'||item.source_type!=='local')
+  if(item.archive_status==='ready'||item.selected_youtube_video_id||item.normalization_status!=='normalized'||item.source_type!=='local'||item.preparation_status!=='needs_confirmation')
     return {ok:true,status:'skipped',reason:'already_ready_or_not_eligible'};
   const normalized=item.normalized_metadata;
   if(!normalized||typeof normalized!=='object')return {ok:false,status:'missing_normalization'};
@@ -37,7 +37,7 @@ export async function refreshYoutubeItem(input,options={}){
   if(foundCandidates)patch.preparation_status='needs_confirmation';
   const {origin,secret}=getNodeConfig(node,options.env||process.env);
   const params=new URLSearchParams({id:`eq.${itemId}`,source_type:'eq.local',normalization_status:'eq.normalized',
-    archive_status:'neq.ready',selected_youtube_video_id:'is.null',select:'id,preparation_status'});
+    archive_status:'neq.ready',preparation_status:'eq.needs_confirmation',selected_youtube_video_id:'is.null',select:'id,preparation_status'});
   const f=options.fetchImpl||fetch;
   let response;
   try{response=await f(`${origin}/rest/v1/pikete_playlist_items?${params}`,{
@@ -50,6 +50,9 @@ export async function refreshYoutubeItem(input,options={}){
     candidates:foundCandidates?result.candidates.length:0};
 }
 export async function refreshYoutubeStale(input={},options={}){
+  // When disabled, leave existing metadata intact; a later enabled sweep can recover it.
+  if ((options.env||process.env).PIKETE_YTDLP_SEARCH_ENABLED !== 'true')
+    return {ok:true,status:'search_disabled',results:[]};
   const nodes=input.node==='both'?['B','C']:[input.node];
   const limit=input.limit??2;
   if(nodes.some(n=>!['B','C'].includes(n))||!Number.isInteger(limit)||limit<1||limit>3)
@@ -57,7 +60,7 @@ export async function refreshYoutubeStale(input={},options={}){
   const candidates=[];
   for(const node of nodes){
     const list=await rows(node,{select:'id,normalized_metadata,selected_youtube_video_id',source_type:'eq.local',
-      normalization_status:'eq.normalized',archive_status:'neq.ready',selected_youtube_video_id:'is.null',
+      normalization_status:'eq.normalized',preparation_status:'eq.needs_confirmation',archive_status:'neq.ready',selected_youtube_video_id:'is.null',
       order:'updated_at.asc',limit:'30'},options);
     for(const item of list){
       const search=item.normalized_metadata?.youtube_search||{};
