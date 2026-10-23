@@ -1,3 +1,5 @@
+> **ESTADO ACTUAL · Render B 1.4.0 / yt-dlp** — Sigue primero [`SUBIR_A_GITHUB.md`](SUBIR_A_GITHUB.md) para instalar la versión completa. El contenido que aparece a continuación describe versiones anteriores y puede mencionar la antigua YouTube Data API, ya reemplazada para el descubrimiento en 1.4.0.
+
 **Actualización 1.0.0:** ver `LEEME_PIKETE_1_8.md` para las diferencias, prioridad y búsqueda cruzada B/C.
 
 # PLAKA PIKETE · Render B v0.9.0 — búsqueda de grabaciones y archivo Telegram

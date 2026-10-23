@@ -2,6 +2,8 @@ import http from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { inspectRecording } from './src/normalization-service.mjs';
+import { enqueueYoutubeItem, sweepYoutubeItems, youtubeJobStatus } from './src/youtube-archive.mjs';
+import { refreshYoutubeItem, enqueueYoutubeRefreshSweep } from './src/youtube-refresh.mjs';
 import { searchCatalog, getCatalogTrack } from './src/plaka-catalog.mjs';
 import { processQueueTick } from './src/pikete-processor.mjs';
 import { ingestOwnerAudio, MAX_AUDIO_BYTES } from './src/telegram-archive.mjs';
@@ -13,7 +15,7 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-1.3.0-candidate';
+const version = 'pikete-render-b-1.4.0-ytdlp';
 const maxBodyBytes = 8192;
 
 function reply(res, status, obj) {
@@ -73,7 +75,9 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: 'plaka-pikete-render-b',
         version,
-        mode: 'queue-priority-youtube-duration-archive-index',
+        mode: 'queue-priority-ytdlp-search-licensed-telegram-archive',
+        youtube_discovery: 'yt-dlp',
+        youtube_archive_policy: 'operator_allowlist',
         note: 'Normaliza por pista, compara candidatos de YouTube, busca archivo indexado B/C y prioriza cuenta verificada.'
       });
     }
@@ -103,6 +107,35 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const result = await queueActions[path](body);
       return reply(res, 200, result);
+    }
+    if (req.method === 'POST' && path === '/api/youtube/refresh-item') {
+      if (!authorizeOrReply(req,res)) return;
+      const body=await readJson(req);
+      const result=await refreshYoutubeItem(body);
+      return reply(res,200,result);
+    }
+    if (req.method === 'POST' && path === '/api/youtube/refresh-stale') {
+      if (!authorizeOrReply(req,res)) return;
+      const body=await readJson(req);
+      const result=enqueueYoutubeRefreshSweep(body);
+      return reply(res,200,result);
+    }
+    if (req.method === 'POST' && path === '/api/archive/youtube-item') {
+      if (!authorizeOrReply(req,res)) return;
+      const body=await readJson(req);
+      const result=await enqueueYoutubeItem(body);
+      return reply(res,result.status==='processing'?202:200,result);
+    }
+    if (req.method === 'POST' && path === '/api/archive/youtube-sweep') {
+      if (!authorizeOrReply(req,res)) return;
+      const body=await readJson(req);
+      const result=await sweepYoutubeItems(body);
+      return reply(res,200,result);
+    }
+    if (req.method === 'GET' && path === '/api/archive/youtube-status') {
+      if (!authorizeOrReply(req,res)) return;
+      const p=new URL(req.url,'http://localhost').searchParams;
+      return reply(res,200,youtubeJobStatus(p.get('node'),p.get('item_id')));
     }
     if (req.method === 'POST' && path === '/api/archive/auto-item') {
       if (!authorizeOrReply(req,res)) return;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {findYoutubeCandidates,_test as yt} from '../src/youtube-discovery.mjs';
+import {findYoutubeCandidates} from '../src/youtube-discovery.mjs';
 import {ingestOwnerAudio,_test as tg} from '../src/telegram-archive.mjs';
 import {Readable} from 'node:stream';
 const PID='f1234567-1234-4234-a234-123456789abc';
@@ -15,23 +15,20 @@ const env={PIKETE_ARCHIVE_UPLOADS_ENABLED:'true',PIKETE_TG_BOT_1_TOKEN:botToken,
  PIKETE_SUPABASE_C_URL:'https://wxleseokrzltkuyjmjev.supabase.co',
  PIKETE_SUPABASE_C_SECRET_KEY:'sb_secret_'+'b'.repeat(32)};
 function json(v,status=200){return new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json'}});}
-test('YouTube discovery uses official API for metadata only and validates duration',async()=>{
+test('yt-dlp discovery needs no YouTube Data API key',async()=>{
  const seen=[];
  const result=await findYoutubeCandidates({ok:true,artist_candidate:'Daft Punk',title_candidate:'One More Time',duration_ms:320000},
-  {env:{PIKETE_YOUTUBE_DATA_API_KEY:'x'.repeat(40)},fetchImpl:async url=>{
-   seen.push(new URL(url));
-   if(url.includes('/search?'))return json({items:[{id:{videoId:'abcdefghijk'},snippet:{title:'Daft Punk - One More Time',channelTitle:'Daft Punk'}}]});
-   return json({items:[{id:'abcdefghijk',contentDetails:{duration:'PT5M20S'}}]});
+  {env:{PIKETE_YTDLP_SEARCH_ENABLED:'true'},searchImpl:async args=>{
+   seen.push(args);return {entries:[{id:'abcdefghijk',title:'Daft Punk - One More Time',channel:'Daft Punk',duration:320}]};
   }});
- assert.equal(result.status,'high_confidence_metadata');assert.equal(result.can_download,false);
+ assert.equal(result.status,'candidates_for_review');assert.equal(result.can_download,false);
  assert.equal(result.candidates[0].duration_ms,320000);
  assert.equal(result.candidates[0].url,'https://www.youtube.com/watch?v=abcdefghijk');
- assert.equal(yt.toDurationMs('PT5M20S'),320000);
- assert.equal(seen.length,2);
+ assert.equal(seen.length,1);
 });
-test('not configured: no YouTube calls and no permitted download',async()=>{
+test('not configured: no subprocess and no downloads',async()=>{
  const result=await findYoutubeCandidates({ok:true,artist_candidate:'A',title_candidate:'B'},
-  {env:{},fetchImpl:()=>{throw Error('must not fetch')}});
+  {env:{},searchImpl:()=>{throw Error('should not run');}});
  assert.equal(result.status,'not_configured');assert.deepEqual(result.candidates,[]);
 });
 function fakeBot(trace){return async (url,req)=>{
