@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {Readable} from 'node:stream';
 import {QueueError,getNodeConfig} from './pikete-queue.mjs';
 import {ingestOwnerAudio,MAX_AUDIO_BYTES} from './telegram-archive.mjs';
-import {runYtDlpJson,runProcess} from './ytdlp-runner.mjs';
+import {runYtDlpJson,runProcess,YTDLP_JS_RUNTIME_ARGS} from './ytdlp-runner.mjs';
 import {selectYtDlpBinary} from './ytdlp-path.mjs';
 import {isPrivateTestGrantActive} from './test-grant.mjs';
 
@@ -16,7 +16,10 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
 const VID=/^[A-Za-z0-9_-]{11}$/;
 const inflight=new Set();
 const recent=new Map();
-function safeError(e){return typeof e?.code==='string'&&/^[a-z_]{3,80}$/.test(e.code)?e.code:'archive_processing_failed';}
+function safeError(e){return typeof e?.code==='string'&&/^[a-z_0-9]{3,80}$/.test(e.code)?e.code:'archive_processing_failed';}
+async function atStage(phase,operation){
+  try{return await operation();}catch(error){if(error&&typeof error==='object'&&!error.phase)error.phase=phase;throw error;}
+}
 function videoAllowlist(env){return new Set(String(env.PIKETE_APPROVED_YOUTUBE_VIDEO_IDS||'').split(',').map(x=>x.trim()).filter(x=>VID.test(x)));}
 function checkEnabled(env){
   if(env.PIKETE_YOUTUBE_INGEST_ENABLED!=='true')throw new QueueError('youtube_archive_disabled',403);
@@ -73,7 +76,7 @@ export async function downloadLicensedVideo(videoId,artist,title,options={}) {
   const run=options.runProcess||runProcess;
   const url=`https://www.youtube.com/watch?v=${videoId}`;
   // No arbitrary media URL and no live/long streams.
-  const info=await runJson(['--dump-single-json','--skip-download',url],options);
+  const info=await atStage('metadata',()=>runJson(['--dump-single-json','--skip-download',url],options));
   if(info?.id!==videoId||!Number.isFinite(info.duration)||info.duration<2||info.duration>900||
      info.is_live===true||['is_live','is_upcoming'].includes(info.live_status))
     throw new QueueError('archive_video_unsuitable',409);
@@ -82,11 +85,11 @@ export async function downloadLicensedVideo(videoId,artist,title,options={}) {
     let command;
     try { command=selectYtDlpBinary(env); }
     catch { throw new QueueError('ytdlp_binary_not_allowed',503); }
-    await run(command,['--ignore-config','--no-playlist','--no-warnings','--no-cache-dir',
+    await atStage('download',()=>run(command,['--ignore-config',...YTDLP_JS_RUNTIME_ARGS,'--no-playlist','--no-cache-dir',
       '--quiet','--no-progress','--no-part','--no-continue','--no-write-info-json','--no-write-thumbnail',
       '--no-write-subs','--no-write-auto-subs','--socket-timeout','15','--retries','1',
       '--format','bestaudio/best','--max-filesize','45M','--output',join(work,'source.%(ext)s'),url],
-      {timeoutMs:160000,maxOutput:2048,cwd:work});
+      {timeoutMs:160000,maxOutput:2048,cwd:work,errorNamespace:'ytdlp'}));
     const files=(await readdir(work)).filter(n=>/^source\.[a-zA-Z0-9]+$/.test(n));
     if(files.length!==1)throw new QueueError('archive_source_missing',502);
     const source=join(work,files[0]);
@@ -94,13 +97,13 @@ export async function downloadLicensedVideo(videoId,artist,title,options={}) {
     if(!inputStat.isFile()||inputStat.size<512||inputStat.size>45*1024*1024)
       throw new QueueError('archive_source_size_invalid',413);
     const output=join(work,'normalized.mp3');
-    await run('ffmpeg',['-hide_banner','-nostdin','-loglevel','error','-y',
+    await atStage('convert',()=>run('ffmpeg',['-hide_banner','-nostdin','-loglevel','error','-y',
       '-i',source,'-vn','-map_metadata','-1','-map','0:a:0',
       '-af','loudnorm=I=-16:TP=-1.5:LRA=11','-ar','44100','-ac','2',
       '-c:a','libmp3lame','-b:a','128k',
       '-metadata',`artist=${String(artist||'').slice(0,180)}`,
       '-metadata',`title=${String(title||'').slice(0,180)}`,'-f','mp3',output],
-      {timeoutMs:120000,maxOutput:2048,cwd:work});
+      {timeoutMs:120000,maxOutput:2048,cwd:work,errorNamespace:'ffmpeg'}));
     const bytes=await readFile(output);
     if(bytes.length<512||bytes.length>MAX_AUDIO_BYTES||!((bytes[0]===73&&bytes[1]===68&&bytes[2]===51)||(bytes[0]===255&&(bytes[1]&224)===224)))
       throw new QueueError('archive_mp3_invalid',413);
@@ -115,8 +118,8 @@ export async function archiveYoutubeItem(node,itemId,options={}){
   const download=options.downloadLicensedVideo||downloadLicensedVideo;
   const ingest=options.ingestOwnerAudio||ingestOwnerAudio;
   const bytes=await download(item.selected_youtube_video_id,item.artist,item.title,options);
-  const result=await ingest({node,playlistId:item.playlist_id,itemId,ownerId,
-    mime:'audio/mpeg',length:bytes.length,stream:Readable.from([bytes])},options);
+  const result=await atStage('telegram',()=>ingest({node,playlistId:item.playlist_id,itemId,ownerId,
+    mime:'audio/mpeg',length:bytes.length,stream:Readable.from([bytes])},options));
   if(!result?.ok||result.archive_status!=='ready')throw new QueueError('archive_ingest_not_ready',502);
   return {ok:true,status:'ready',reused:result.reused_audio===true};
 }
@@ -132,7 +135,7 @@ export async function enqueueYoutubeItem(input,options={}){
   if(inflight.has(key))return {ok:true,status:'processing'};
   const previous=recent.get(key);
   if(previous?.status==='failed'&&Date.now()-previous.time<5*60*1000)
-    return {ok:false,status:'retry_cooldown',code:previous.code};
+    return {ok:false,status:'retry_cooldown',code:previous.code,phase:previous.phase??null};
   inflight.add(key);
   recent.set(key,{status:'processing',time:Date.now()});
   const run=options.archiveYoutubeItem||archiveYoutubeItem;
@@ -141,8 +144,9 @@ export async function enqueueYoutubeItem(input,options={}){
       recent.set(key,{status:'ready',time:Date.now(),result});
     }).catch(e=>{
       const code=safeError(e);
-      recent.set(key,{status:'failed',code,time:Date.now()});
-      console.error('licensed_youtube_archive_failed',node,code);
+      const phase=/^(metadata|download|convert|telegram)$/.test(e?.phase||'')?e.phase:'unknown';
+      recent.set(key,{status:'failed',code,phase,time:Date.now()});
+      console.error('licensed_youtube_archive_failed',node,phase,code);
     }).finally(()=>{inflight.delete(key);if(recent.size>250)recent.delete(recent.keys().next().value);});
   });
   return {ok:true,status:'processing',item_id:itemId};
@@ -150,7 +154,7 @@ export async function enqueueYoutubeItem(input,options={}){
 
 export function youtubeJobStatus(node,itemId){
   const status=recent.get(`${node}:${itemId}`);
-  return status?{ok:true,status:status.status,code:status.code??null}:
+  return status?{ok:true,status:status.status,code:status.code??null,phase:status.phase??null}:
     {ok:true,status:'not_started'};
 }
 export async function sweepYoutubeItems(input={},options={}){

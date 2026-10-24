@@ -21,7 +21,7 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-1.4.7-shared-qa-grant';
+const version = 'pikete-render-b-1.4.8-js-runtime-diagnostics';
 const maxBodyBytes = 8192;
 async function ytDlpProbeStatus(){
   let cmd;
@@ -255,7 +255,7 @@ async function recoverTestArchives() {
   qaSweepBusy = true;
   try {
     const run = await sweepYoutubeItems({node:'both',limit:2});
-    if (run.results.length) console.info('[pikete] qa_archive_sweep',run.results.map(x => ({node:x.node,status:x.status,code:x.code})));
+    if (run.results.length) console.info('[pikete] qa_archive_sweep',run.results.map(x => ({node:x.node,status:x.status,phase:x.phase??null,code:x.code??null})));
   } catch (e) {
     console.warn('[pikete] qa_archive_sweep_failed',e?.code||'unavailable');
   } finally {qaSweepBusy = false;}

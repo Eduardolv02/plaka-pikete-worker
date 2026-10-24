@@ -1,6 +1,6 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "private": true,
   "type": "module",
   "description": "Pikete: identidad MusicBrainz + catalogo Plaka + archivo de audio con hash",
