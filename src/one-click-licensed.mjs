@@ -11,8 +11,9 @@ const VIDEO=/^[A-Za-z0-9_-]{11}$/;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function choosePreapprovedRecording(metadata, env = {}) {
-  if (env.PIKETE_ONE_CLICK_LICENSED_ENABLED !== 'true' ||
-      env.PIKETE_YOUTUBE_INGEST_ENABLED !== 'true' ||
+  // Do not require yet another Render variable for the existing approved-source workflow.
+  // These are the established archive gates and the per-video operator allowlist.
+  if (env.PIKETE_YOUTUBE_INGEST_ENABLED !== 'true' ||
       env.PIKETE_ARCHIVE_UPLOADS_ENABLED !== 'true') return null;
   const search=metadata?.youtube_search;
   if (search?.status !== 'candidates_for_review' || !Array.isArray(search.candidates)) return null;

@@ -6,6 +6,16 @@ import {findYoutubeCandidates} from './youtube-discovery.mjs';
 import {autoArchivePreapproved} from './one-click-licensed.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const busy=new Set();
+// Do not quarantine a transient outage for six hours. Conversely, avoid
+// hammering YouTube when there are genuinely no matches.
+export function shouldRetryDiscovery(search={},now=Date.now()) {
+  const status=search.status;
+  const delays={not_configured:60_000,disabled:60_000,temporarily_unavailable:90_000,
+    no_candidates:6*3600_000};
+  if(status!==undefined && !Object.hasOwn(delays,status))return false;
+  const last=Date.parse(search.refreshed_at||'');
+  return !Number.isFinite(last) || now-last>= (delays[status]??60_000);
+}
 async function rows(node,params,options={}){
   const {origin,secret}=getNodeConfig(node,options.env||process.env);
   const f=options.fetchImpl||fetch;
@@ -70,9 +80,7 @@ export async function refreshYoutubeStale(input={},options={}){
       order:'updated_at.asc',limit:'30'},options);
     for(const item of list){
       const search=item.normalized_metadata?.youtube_search||{};
-      const age=Date.now()-Date.parse(search.refreshed_at||0);
-      if(['not_configured','temporarily_unavailable','no_candidates','disabled'].includes(search.status) &&
-         (!Number.isFinite(age)||age>6*3600000))candidates.push({node,item_id:item.id});
+      if(shouldRetryDiscovery(search))candidates.push({node,item_id:item.id});
       if(candidates.filter(x=>x.node===node).length>=limit)break;
     }
   }

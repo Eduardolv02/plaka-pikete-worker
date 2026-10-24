@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {refreshYoutubeStale,refreshYoutubeItem} from '../src/youtube-refresh.mjs';
+import {refreshYoutubeStale,refreshYoutubeItem,shouldRetryDiscovery} from '../src/youtube-refresh.mjs';
 const uuid='2c8a0ca0-a18e-4a7f-91ae-2285eaa22301';
 test('disabled yt-dlp never modifies previous normalization',async()=>{
  let requests=0;
@@ -11,4 +11,19 @@ test('refresh skips already confirmed/archived track and never calls search',asy
  let searched=0;const data={id:uuid,source_type:'local',normalization_status:'normalized',archive_status:'none',selected_youtube_video_id:null,preparation_status:'awaiting_audio'};
  const result=await refreshYoutubeItem({node:'B',item_id:uuid},{env:{PIKETE_SUPABASE_B_URL:'https://cpdklixfmiibrcptleir.supabase.co',PIKETE_SUPABASE_B_SECRET_KEY:'sb_secret_'+('a'.repeat(26))},fetchImpl:async()=>({ok:true,json:async()=>[data]}),findYoutubeCandidates:async()=>{searched++}});
  assert.equal(result.status,'skipped');assert.equal(searched,0);
+});
+
+test('temporary outage becomes retryable after 90 seconds, not six hours',()=>{
+ const now=Date.parse('2026-10-23T20:00:00Z');
+ assert.equal(shouldRetryDiscovery({status:'temporarily_unavailable',refreshed_at:new Date(now-40_000).toISOString()},now),false);
+ assert.equal(shouldRetryDiscovery({status:'temporarily_unavailable',refreshed_at:new Date(now-95_000).toISOString()},now),true);
+ assert.equal(shouldRetryDiscovery({status:'not_configured'},now),true);
+ assert.equal(shouldRetryDiscovery({status:'no_candidates',refreshed_at:new Date(now-95_000).toISOString()},now),false);
+ assert.equal(shouldRetryDiscovery({status:'candidates_for_review'},now),false);
+});
+test('normalized old song with missing status may be recovered without touching ready songs',()=>{
+ const now=Date.parse('2026-10-23T20:00:00Z');
+ assert.equal(shouldRetryDiscovery({},now),true);
+ assert.equal(shouldRetryDiscovery({status:'not_configured',refreshed_at:new Date(now-61_000).toISOString()},now),true);
+ assert.equal(shouldRetryDiscovery({status:'disabled',refreshed_at:new Date(now-30_000).toISOString()},now),false);
 });

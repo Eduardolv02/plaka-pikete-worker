@@ -3,6 +3,7 @@
  */
 import {spawn} from 'node:child_process';
 import {QueueError} from './pikete-queue.mjs';
+import {selectYtDlpBinary} from './ytdlp-path.mjs';
 
 export async function runProcess(command, args, {timeoutMs=45000,maxOutput=524288,cwd,spawnImpl=spawn}={}) {
   return await new Promise((resolve,reject)=>{
@@ -24,10 +25,10 @@ export async function runProcess(command, args, {timeoutMs=45000,maxOutput=52428
 
 export async function runYtDlpJson(args,options={}){
   const env=options.env||process.env;
-  const command=env.PIKETE_YTDLP_BIN||'yt-dlp';
   // No user can choose the executable or pass arbitrary yt-dlp options.
-  if(!/^(?:yt-dlp|\/app\/\.venv\/bin\/yt-dlp)$/.test(command))
-    throw new QueueError('ytdlp_binary_not_allowed',503);
+  let command;
+  try { command=selectYtDlpBinary(env); }
+  catch { throw new QueueError('ytdlp_binary_not_allowed',503); }
   const exec=options.runProcess||runProcess;
   const raw=await exec(command,['--ignore-config','--no-playlist','--no-warnings',
     '--no-cache-dir','--socket-timeout','12','--retries','1','--extractor-retries','1',...args],

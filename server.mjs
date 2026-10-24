@@ -1,6 +1,9 @@
 import http from 'node:http';
 import {spawnSync} from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { selectYtDlpBinary, NODE_BIN } from './src/ytdlp-path.mjs';
+import { ensureYtDlpInstalled } from './scripts/install-ytdlp.mjs';
+import { createYtDlpBootstrap } from './src/ytdlp-bootstrap.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { inspectRecording } from './src/normalization-service.mjs';
@@ -17,13 +20,19 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-1.4.2-one-click-licensed';
+const version = 'pikete-render-b-1.4.5-self-healing';
 const maxBodyBytes = 8192;
 function ytDlpAvailable(){
-  const cmd=process.env.PIKETE_YTDLP_BIN||'yt-dlp';
-  if(!/^(?:yt-dlp|\/app\/\.venv\/bin\/yt-dlp)$/.test(cmd))return false;
+  let cmd;
+  try { cmd=selectYtDlpBinary(); } catch { return false; }
   const r=spawnSync(cmd,['--version'],{timeout:4000,encoding:'utf8',stdio:['ignore','pipe','ignore']});
   return !r.error && r.status===0;
+}
+async function installYtDlpIfMissing(){
+  // Reuse a working executable from the original Node setup instead of
+  // downloading a second one. No additional Render configuration required.
+  if(ytDlpAvailable())return {installed:false,source:'existing_path'};
+  return ensureYtDlpInstalled();
 }
 
 function reply(res, status, obj) {
@@ -88,6 +97,12 @@ const server = http.createServer(async (req, res) => {
         discovery: {
           search_enabled: process.env.PIKETE_YTDLP_SEARCH_ENABLED === 'true',
           docker_ytdlp_binary_detected: ytDlpAvailable(),
+          ytdlp_binary_detected: ytDlpAvailable(),
+          ytdlp_installation: existsSync(NODE_BIN) ? 'node_local' : 'external_or_missing',
+          bootstrap: bootstrap.state.status,
+          bootstrap_error_code: bootstrap.state.code,
+          bootstrap_retry_attempts: bootstrap.state.attempts,
+          bootstrap_last_success_at: bootstrap.state.last_success_at,
           ffmpeg_binary_detected: existsSync('/usr/bin/ffmpeg'),
           processor_enabled: process.env.PIKETE_PROCESSOR_ENABLED === 'true',
           queue_mutations_enabled: process.env.PIKETE_QUEUE_MUTATIONS_ENABLED === 'true'
@@ -224,4 +239,22 @@ const server = http.createServer(async (req, res) => {
 });
 server.requestTimeout = 120000;
 server.headersTimeout = 10000;
-server.listen(port, '0.0.0.0', () => console.log(`${version} listening on ${port}`));
+// Preserve both existing Render Node entrypoints (`node server.mjs`, `npm start`).
+// Install the official pinned executable without extra Render env/build commands.
+// If GitHub or the server network is transiently unavailable, retry while running.
+function triggerStaleSearch() {
+  try { enqueueYoutubeRefreshSweep({node:'both',limit:2}); }
+  catch(e) { console.error('[pikete] youtube_refresh_launch_failed',e?.code||'unexpected'); }
+}
+const bootstrap=createYtDlpBootstrap({
+  install:installYtDlpIfMissing,
+  isAvailable:ytDlpAvailable,
+  enabled:()=>process.env.PIKETE_YTDLP_SEARCH_ENABLED==='true',
+  refresh:triggerStaleSearch,
+  onReady:()=>console.log('[pikete] yt-dlp installed and executable; refreshing stale Pikete matches'),
+  onFailure:(code)=>console.error('[pikete] yt-dlp bootstrap/recovery:',code),
+});
+server.listen(port, '0.0.0.0', () => {
+  console.log(`${version} listening on ${port}`);
+  setImmediate(()=>void bootstrap.run());
+});

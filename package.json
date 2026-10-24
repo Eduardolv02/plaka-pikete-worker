@@ -1,12 +1,13 @@
 {
   "name": "plaka-pikete-render-b",
-  "version": "1.4.2",
+  "version": "1.4.4",
   "private": true,
   "type": "module",
   "description": "Pikete: identidad MusicBrainz + catalogo Plaka + archivo de audio con hash",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "build:yt-dlp": "node scripts/install-ytdlp.mjs"
   },
   "engines": {
     "node": ">=20 <27"

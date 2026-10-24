@@ -9,6 +9,7 @@ import {Readable} from 'node:stream';
 import {QueueError,getNodeConfig} from './pikete-queue.mjs';
 import {ingestOwnerAudio,MAX_AUDIO_BYTES} from './telegram-archive.mjs';
 import {runYtDlpJson,runProcess} from './ytdlp-runner.mjs';
+import {selectYtDlpBinary} from './ytdlp-path.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VID=/^[A-Za-z0-9_-]{11}$/;
@@ -75,8 +76,9 @@ export async function downloadLicensedVideo(videoId,artist,title,options={}) {
     throw new QueueError('archive_video_unsuitable',409);
   const work=await mkdtemp(join(tmpdir(),'plaka-ytdlp-'));
   try{
-    const command=env.PIKETE_YTDLP_BIN||'yt-dlp';
-    if(!/^(?:yt-dlp|\/app\/\.venv\/bin\/yt-dlp)$/.test(command))throw new QueueError('ytdlp_binary_not_allowed',503);
+    let command;
+    try { command=selectYtDlpBinary(env); }
+    catch { throw new QueueError('ytdlp_binary_not_allowed',503); }
     await run(command,['--ignore-config','--no-playlist','--no-warnings','--no-cache-dir',
       '--quiet','--no-progress','--no-part','--no-continue','--no-write-info-json','--no-write-thumbnail',
       '--no-write-subs','--no-write-auto-subs','--socket-timeout','15','--retries','1',
