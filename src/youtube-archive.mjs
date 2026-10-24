@@ -10,6 +10,7 @@ import {QueueError,getNodeConfig} from './pikete-queue.mjs';
 import {ingestOwnerAudio,MAX_AUDIO_BYTES} from './telegram-archive.mjs';
 import {runYtDlpJson,runProcess} from './ytdlp-runner.mjs';
 import {selectYtDlpBinary} from './ytdlp-path.mjs';
+import {isPrivateTestGrantActive} from './test-grant.mjs';
 
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const VID=/^[A-Za-z0-9_-]{11}$/;
@@ -53,13 +54,15 @@ export async function verifyConfirmedVideo(node,itemId,options={}){
   const choices=item.normalized_metadata?.youtube_search?.candidates;
   if(!VID.test(id||'')||!Array.isArray(choices)||!choices.some(c=>c.video_id===id))
     throw new QueueError('archive_video_not_in_candidates',409);
-  // Only individually operator-cleared recordings, never generic catalog videos.
-  if(!videoAllowlist(env).has(id))throw new QueueError('archive_video_not_licensed',403);
+  // The test grant is server-side, never a client flag. Require membership in
+  // an active PRIVATE playlist regardless of which rights route is used.
   const playlists=await dbRows(node,'pikete_playlists',{
     select:'id,owner_user_id',id:`eq.${item.playlist_id}`,kind:'eq.private',status:'eq.active',limit:'1'
   },options);
   const playlist=playlists[0];
   if(!UUID.test(playlist?.owner_user_id||''))throw new QueueError('archive_owner_required',403);
+  if(!videoAllowlist(env).has(id) && !isPrivateTestGrantActive(env))
+    throw new QueueError('archive_video_not_licensed',403);
   return {alreadyReady:false,item,ownerId:playlist.owner_user_id};
 }
 
@@ -157,16 +160,19 @@ export async function sweepYoutubeItems(input={},options={}){
   const limit=input.limit??2;
   if(nodes.some(n=>!['B','C'].includes(n))||!Number.isInteger(limit)||limit<1||limit>5)
     throw new QueueError('invalid_archive_sweep',400);
-  const allowed=videoAllowlist(env),results=[];
+  const allowed=videoAllowlist(env),testGrant=isPrivateTestGrantActive(env),results=[];
   for(const node of nodes){
+    let nodeStarted=0;
     const rows=await dbRows(node,'pikete_playlist_items',{
       select:'id,selected_youtube_video_id',source_type:'eq.local',
       preparation_status:'eq.awaiting_audio',archive_status:'neq.ready',
       selected_youtube_video_id:'not.is.null',order:'updated_at.asc',limit:'30'
     },options);
     for(const item of rows){
-      if(results.length>=limit*nodes.length)break;
-      if(!allowed.has(item.selected_youtube_video_id))continue;
+      // Apply the limit per shard; B must never starve C (Panitas).
+      if(nodeStarted>=limit)break;
+      if(!allowed.has(item.selected_youtube_video_id) && !testGrant)continue;
+      nodeStarted++;
       try{results.push({node,item_id:item.id,...await enqueueYoutubeItem({node,item_id:item.id},options)});}
       catch(e){results.push({node,item_id:item.id,ok:false,code:safeError(e)});}
     }

@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { selectYtDlpBinary, NODE_BIN } from './src/ytdlp-path.mjs';
 import { ensureYtDlpInstalled } from './scripts/install-ytdlp.mjs';
 import { createYtDlpBootstrap } from './src/ytdlp-bootstrap.mjs';
+import { isPrivateTestGrantActive } from './src/test-grant.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import { normalizeMetadata } from './src/normalize.mjs';
 import { inspectRecording } from './src/normalization-service.mjs';
@@ -20,7 +21,7 @@ import { QueueError, getQueueSummary, claimQueueJobs, heartbeatQueueJob, finishQ
 
 const port = Number(process.env.PORT || 10000);
 const key = process.env.PIKETE_WORKER_KEY || '';
-const version = 'pikete-render-b-1.4.6-async-probe';
+const version = 'pikete-render-b-1.4.7-shared-qa-grant';
 const maxBodyBytes = 8192;
 async function ytDlpProbeStatus(){
   let cmd;
@@ -106,9 +107,12 @@ const server = http.createServer(async (req, res) => {
           bootstrap_last_success_at: bootstrap.state.last_success_at,
           ffmpeg_binary_detected: existsSync('/usr/bin/ffmpeg'),
           processor_enabled: process.env.PIKETE_PROCESSOR_ENABLED === 'true',
-          queue_mutations_enabled: process.env.PIKETE_QUEUE_MUTATIONS_ENABLED === 'true'
+          queue_mutations_enabled: process.env.PIKETE_QUEUE_MUTATIONS_ENABLED === 'true',
+          youtube_ingest_enabled: process.env.PIKETE_YOUTUBE_INGEST_ENABLED === 'true',
+          archive_uploads_enabled: process.env.PIKETE_ARCHIVE_UPLOADS_ENABLED === 'true',
+          private_test_grant_active: isPrivateTestGrantActive()
         },
-        youtube_archive_policy: 'operator_allowlist',
+        youtube_archive_policy: isPrivateTestGrantActive() ? 'shared_private_qa_grant' : 'operator_allowlist',
         note: 'Normaliza por pista, compara candidatos de YouTube, busca archivo indexado B/C y prioriza cuenta verificada.'
       });
     }
@@ -243,6 +247,19 @@ server.headersTimeout = 10000;
 // Preserve both existing Render Node entrypoints (`node server.mjs`, `npm start`).
 // Install the official pinned executable without extra Render env/build commands.
 // If GitHub or the server network is transiently unavailable, retry while running.
+// Every already-confirmed QA item is recovered without a new Android action.
+// Limited sweeps and in-flight dedupe prevent concurrent repeated downloads.
+let qaSweepBusy = false;
+async function recoverTestArchives() {
+  if (!isPrivateTestGrantActive() || qaSweepBusy || bootstrap.state.status !== 'ready') return;
+  qaSweepBusy = true;
+  try {
+    const run = await sweepYoutubeItems({node:'both',limit:2});
+    if (run.results.length) console.info('[pikete] qa_archive_sweep',run.results.map(x => ({node:x.node,status:x.status,code:x.code})));
+  } catch (e) {
+    console.warn('[pikete] qa_archive_sweep_failed',e?.code||'unavailable');
+  } finally {qaSweepBusy = false;}
+}
 function triggerStaleSearch() {
   try { enqueueYoutubeRefreshSweep({node:'both',limit:2}); }
   catch(e) { console.error('[pikete] youtube_refresh_launch_failed',e?.code||'unexpected'); }
@@ -252,9 +269,16 @@ const bootstrap=createYtDlpBootstrap({
   isAvailable:ytDlpProbeStatus,
   enabled:()=>process.env.PIKETE_YTDLP_SEARCH_ENABLED==='true',
   refresh:triggerStaleSearch,
-  onReady:()=>console.log('[pikete] yt-dlp installed and executable; refreshing stale Pikete matches'),
+  onReady:()=>{
+    console.log('[pikete] yt-dlp installed and executable; refreshing stale Pikete matches');
+    setImmediate(()=>void recoverTestArchives());
+  },
   onFailure:(code)=>console.error('[pikete] yt-dlp bootstrap/recovery:',code),
 });
+// Best-effort recovery while awake; after a Render sleep the startup sweep
+// picks up pending songs again. Cloudflare's existing triggers remain valid.
+const qaTimer = setInterval(()=>void recoverTestArchives(),120_000);
+qaTimer.unref();
 server.listen(port, '0.0.0.0', () => {
   console.log(`${version} listening on ${port}`);
   setImmediate(()=>void bootstrap.run());

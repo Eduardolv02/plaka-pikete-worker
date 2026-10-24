@@ -6,6 +6,7 @@
  */
 import {getNodeConfig} from './pikete-queue.mjs';
 import {enqueueYoutubeItem} from './youtube-archive.mjs';
+import {isPrivateTestGrantActive} from './test-grant.mjs';
 
 const VIDEO=/^[A-Za-z0-9_-]{11}$/;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -27,7 +28,9 @@ export function choosePreapprovedRecording(metadata, env = {}) {
   if (Number.isFinite(secondScore) && score-secondScore<0.12) return null;
   const approved=new Set(String(env.PIKETE_APPROVED_YOUTUBE_VIDEO_IDS||'')
     .split(',').map(v=>v.trim()).filter(v=>VIDEO.test(v)));
-  return approved.has(first.video_id) ? first.video_id : null;
+  // An operator's one-time test-environment attestation applies to all private
+  // QA recordings across B/C, phones and Panitas. Confidence checks remain.
+  return (approved.has(first.video_id) || isPrivateTestGrantActive(env)) ? first.video_id : null;
 }
 
 export async function autoArchivePreapproved(node,itemId,metadata,options={}){
