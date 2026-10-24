@@ -80,3 +80,15 @@ test('stopping cancels further retries',async()=>{
  bootstrap.stop();assert.equal(clock.scheduled.size,0);
  await bootstrap.run();assert.equal(clock.scheduled.size,0);
 });
+
+test('a timed-out or permission-denied binary keeps a specific diagnostic code in health state',async()=>{
+ const clock=fakeClock();let code='yt_dlp_probe_timeout';
+ const bootstrap=createYtDlpBootstrap({install:async()=>{},isAvailable:async()=>({ok:false,code}),
+  refresh:()=>{},enabled:()=>true,...clock});
+ await bootstrap.run();
+ assert.equal(bootstrap.state.code,'yt_dlp_probe_timeout');
+ code='yt_dlp_permission_denied';
+ await clock.fire('timeout');
+ assert.equal(bootstrap.state.code,'yt_dlp_permission_denied');
+ bootstrap.stop();
+});

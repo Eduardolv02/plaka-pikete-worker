@@ -49,6 +49,6 @@ test('Render start entrypoint installs automatically without requiring build or 
  assert.equal(pkg.scripts.start,'node server.mjs');
  assert.match(server,/setImmediate\(\(\)=>void bootstrap\.run\(\)\)/);
  assert.match(server,/install:installYtDlpIfMissing/);
- assert.match(server,/if\(ytDlpAvailable\(\)\)return/);
+ assert.match(server,/if\(\(await ytDlpProbeStatus\(\)\)\.ok\)return/);
  assert.match(server,/enqueueYoutubeRefreshSweep\(\{node:'both',limit:2\}\)/);
 });

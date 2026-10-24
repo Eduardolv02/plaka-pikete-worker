@@ -24,7 +24,13 @@ export function createYtDlpBootstrap({
       state.code=null;
       try {
         await install();
-        if(!isAvailable()) throw Object.assign(new Error('yt_dlp_not_executable'),{code:'yt_dlp_not_executable'});
+        const check=await isAvailable();
+        const available=(check && typeof check==='object')?check.ok===true:!!check;
+        if(!available){
+          const code=(check && typeof check==='object' && /^yt_dlp_[a-z0-9_]+$/.test(check.code||''))
+            ?check.code:'yt_dlp_not_executable';
+          throw Object.assign(new Error(code),{code});
+        }
         state.status='ready';
         state.attempts=0;
         state.last_success_at=new Date().toISOString();
